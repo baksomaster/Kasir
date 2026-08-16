@@ -37,6 +37,46 @@
             .no-print { display: none !important; }
         }
 
+        /* ===== Kasir Category Interaction ===== */
+        .category-scroll {
+            scroll-behavior: smooth;
+            overscroll-behavior-x: contain;
+            scroll-snap-type: x proximity;
+        }
+        .category-chip {
+            flex: 0 0 auto;
+            transition: background-color .18s ease, color .18s ease,
+                        border-color .18s ease, box-shadow .18s ease,
+                        transform .16s ease;
+            border: 1px solid transparent;
+        }
+        .category-chip:not(.category-active):hover {
+            transform: translateY(-1px);
+            border-color: rgba(6,182,212,.35);
+            background-color: rgba(226,232,240,.9) !important;
+        }
+        .category-chip.category-active {
+            background-color: #06b6d4 !important;
+            color: #081952 !important;
+            border-color: #22d3ee;
+            box-shadow: 0 4px 12px rgba(6,182,212,.25);
+        }
+        .category-chip.category-active:hover {
+            background-color: #22d3ee !important;
+            border-color: #67e8f9;
+            transform: translateY(-1px);
+            box-shadow: 0 7px 18px rgba(6,182,212,.34);
+        }
+        .category-chip:active { transform: scale(.97); }
+        html[data-theme="dark"] .category-chip:not(.category-active) {
+            background-color: #151f36 !important;
+            color: #cbd5e1 !important;
+        }
+        html[data-theme="dark"] .category-chip:not(.category-active):hover {
+            background-color: #24314d !important;
+            color: #f8fafc !important;
+        }
+
         /* ===== Bakso Master Elegant UI ===== */
         :root {
             --ui-bg: #f4f7fb;
@@ -1069,6 +1109,11 @@
 
         function render() {
             applyTheme();
+
+            // Simpan posisi scroll kategori sebelum DOM kasir dibuat ulang.
+            const oldCategoryScroll = document.getElementById('category-scroll-container');
+            const categoryScrollLeft = oldCategoryScroll ? oldCategoryScroll.scrollLeft : 0;
+
             const app = document.getElementById('app');
             app.className = "flex-1 flex flex-col min-h-screen";
             if (!state.currentUser) {
@@ -1092,6 +1137,12 @@
             const cartContainer = document.getElementById('cart-items-container');
             if (cartContainer) {
                 cartContainer.scrollTop = cartContainer.scrollHeight;
+            }
+
+            // Kembalikan posisi horizontal kategori setelah render.
+            const newCategoryScroll = document.getElementById('category-scroll-container');
+            if (newCategoryScroll) {
+                newCategoryScroll.scrollLeft = categoryScrollLeft;
             }
         }
 
@@ -1480,12 +1531,12 @@
                                 <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
                                 <input type="text" placeholder="Cari bakso, mie, es teh..." value="${state.searchQuery}" oninput="handleSearchInput(this.value)" class="w-full bg-slate-50 border border-slate-200 pl-10 pr-4 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
                             </div>
-                            <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                                <button onclick="selectCategory('all')" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${state.selectedCategory === 'all' ? 'bg-cyan-500 text-slate-950 shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
-                                    Semua Menu
+                            <div id="category-scroll-container" class="category-scroll flex gap-2 overflow-x-auto pb-1 no-scrollbar" aria-label="Kategori menu">
+                                <button type="button" data-category="all" onclick="selectCategory('all')" class="category-chip px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 ${state.selectedCategory === 'all' ? 'category-active' : 'bg-slate-100 text-slate-600'}">
+                                    <i data-lucide="grid-2x2" class="w-3.5 h-3.5"></i> Semua Menu
                                 </button>
                                 ${state.categories.map(c => `
-                                    <button onclick="selectCategory('${c.id}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${state.selectedCategory === c.id ? 'bg-cyan-500 text-slate-950 shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                    <button type="button" data-category="${c.id}" onclick="selectCategory('${c.id}')" class="category-chip px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 ${state.selectedCategory === c.id ? 'category-active' : 'bg-slate-100 text-slate-600'}">
                                         <span>${c.icon}</span> ${c.name}
                                     </button>
                                 `).join('')}
@@ -2606,8 +2657,32 @@
             render(); 
         }
 
+        function updateCategoryButtons(scrollToSelected = false) {
+            const container = document.getElementById('category-scroll-container');
+            if (!container) return;
+
+            container.querySelectorAll('[data-category]').forEach(button => {
+                const isActive = button.dataset.category === state.selectedCategory;
+                button.classList.toggle('category-active', isActive);
+                button.classList.toggle('bg-slate-100', !isActive);
+                button.classList.toggle('text-slate-600', !isActive);
+                button.setAttribute('aria-pressed', String(isActive));
+            });
+
+            if (scrollToSelected) {
+                const selectedButton = container.querySelector(`[data-category="${CSS.escape(state.selectedCategory)}"]`);
+                if (selectedButton) {
+                    selectedButton.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+            }
+        }
+
         function selectCategory(c) { 
             state.selectedCategory = c; 
+
+            // Jangan render seluruh aplikasi. Cukup perbarui tombol kategori + grid menu.
+            updateCategoryButtons(true);
+
             const gridContainer = document.getElementById('product-grid-container');
             if (gridContainer) {
                 gridContainer.innerHTML = renderProductGridHTML();
