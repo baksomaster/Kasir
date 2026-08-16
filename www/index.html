@@ -825,7 +825,7 @@
             `;
         }
 
-        function downloadBackupExcel(backupKey, dateStr) {
+        async function downloadBackupExcel(backupKey, dateStr) {
             try {
                 const raw = localStorage.getItem(backupKey);
                 if (!raw) return;
@@ -896,7 +896,10 @@
                 XLSX.utils.book_append_sheet(wb, wsSales, "Menu Terjual");
                 XLSX.utils.book_append_sheet(wb, wsExp, "Belanja Harian");
 
-                XLSX.writeFile(wb, `Laporan_Backup_${dateStr}.xlsx`);
+                await saveExcelUniversal(
+    wb,
+    `Laporan_Backup_${dateStr}.xlsx`
+);
                 alert('File Excel laporan berhasil diunduh!');
             } catch (e) {
                 console.error(e);
@@ -2146,6 +2149,131 @@
                 </div>
             `;
         }
+        async function saveExcelUniversal(workbook, fileName) {
+    try {
+        /*
+         * ==========================================
+         * MODE APK CAPACITOR
+         * ==========================================
+         */
+
+        const Capacitor = window.Capacitor;
+
+        if (
+            Capacitor &&
+            Capacitor.isNativePlatform &&
+            Capacitor.isNativePlatform()
+        ) {
+            const Filesystem =
+                Capacitor.Plugins &&
+                Capacitor.Plugins.Filesystem;
+
+            const Share =
+                Capacitor.Plugins &&
+                Capacitor.Plugins.Share;
+
+            if (!Filesystem) {
+                throw new Error(
+                    'Plugin Filesystem belum tersedia di APK.'
+                );
+            }
+
+            /*
+             * Buat XLSX menjadi ArrayBuffer
+             */
+            const excelArrayBuffer = XLSX.write(
+                workbook,
+                {
+                    bookType: 'xlsx',
+                    type: 'array'
+                }
+            );
+
+            /*
+             * ArrayBuffer → Base64
+             */
+            const bytes = new Uint8Array(
+                excelArrayBuffer
+            );
+
+            let binary = '';
+
+            const chunkSize = 0x8000;
+
+            for (
+                let i = 0;
+                i < bytes.length;
+                i += chunkSize
+            ) {
+                binary += String.fromCharCode(
+                    ...bytes.subarray(
+                        i,
+                        Math.min(
+                            i + chunkSize,
+                            bytes.length
+                        )
+                    )
+                );
+            }
+
+            const base64 =
+                btoa(binary);
+
+            /*
+             * Simpan ke folder Documents
+             */
+            const result =
+                await Filesystem.writeFile({
+                    path: fileName,
+                    data: base64,
+                    directory: 'DOCUMENTS',
+                    recursive: true
+                });
+
+            /*
+             * Buka menu Share Android
+             */
+            if (Share && result.uri) {
+                await Share.share({
+                    title: 'Export Excel',
+                    text: 'Laporan Excel Bakso Master',
+                    url: result.uri,
+                    dialogTitle:
+                        'Buka atau bagikan file Excel'
+                });
+            } else {
+                alert(
+                    'File Excel berhasil disimpan:\n\n' +
+                    fileName
+                );
+            }
+
+            return;
+        }
+
+        /*
+         * ==========================================
+         * MODE WEBSITE / GITHUB PAGES
+         * ==========================================
+         */
+
+        XLSX.writeFile(
+            workbook,
+            fileName
+        );
+
+    } catch (error) {
+        console.error(
+            'Export Excel error:',
+            error
+        );
+
+        alert(
+            'Gagal menyimpan file Excel.\n\n' +
+            error.message
+        );
+    }
+        }
 
         function renderSoldItemsTab() {
             let soldItems = [];
@@ -2223,71 +2351,104 @@
             `;
         }
 
-        function handleExportSoldItems() {
-            if (typeof XLSX === 'undefined') {
-                alert('Library Excel belum dimuat!');
-                return;
-            }
+        async function handleExportSoldItems() {
+    if (typeof XLSX === 'undefined') {
+        alert('Library Excel belum dimuat!');
+        return;
+    }
 
-            const todayStr = getTodayDateString();
-            const sortedTransactions = [...state.transactions].reverse();
+    try {
+        const todayStr = getTodayDateString();
+        const sortedTransactions = [...state.transactions].reverse();
 
-            const rows = [];
-            rows.push([state.settings.storeName.toUpperCase()]);
-            rows.push(["LAPORAN PENJUALAN & MENU TERJUAL HARIAN"]);
-            rows.push([`Tanggal Export: ${todayStr}`]);
-            rows.push([]);
+        const rows = [];
 
-            rows.push(["No", "Waktu", "No TRX", "Nama Menu", "Kasir", "Metode Bayar", "Qty", "Harga Satuan", "Subtotal"]);
+        rows.push([state.settings.storeName.toUpperCase()]);
+        rows.push(["LAPORAN PENJUALAN & MENU TERJUAL HARIAN"]);
+        rows.push([`Tanggal Export: ${todayStr}`]);
+        rows.push([]);
 
-            let totalQtyAll = 0;
-            let totalRevenueAll = 0;
-            let no = 1;
+        rows.push([
+            "No",
+            "Waktu",
+            "No TRX",
+            "Nama Menu",
+            "Kasir",
+            "Metode Bayar",
+            "Qty",
+            "Harga Satuan",
+            "Subtotal"
+        ]);
 
-            sortedTransactions.forEach(t => {
-                t.items.forEach(i => {
-                    rows.push([
-                        no++,
-                        `${t.date} ${t.time}`,
-                        t.id,
-                        i.name,
-                        t.cashierName || 'Kasir',
-                        t.paymentMethod || 'Tunai',
-                        i.qty,
-                        i.price,
-                        i.subtotal
-                    ]);
-                    totalQtyAll += i.qty;
-                    totalRevenueAll += i.subtotal;
-                });
+        let totalQtyAll = 0;
+        let totalRevenueAll = 0;
+        let no = 1;
+
+        sortedTransactions.forEach(t => {
+            (t.items || []).forEach(i => {
+                rows.push([
+                    no++,
+                    `${t.date} ${t.time}`,
+                    t.id,
+                    i.name,
+                    t.cashierName || 'Kasir',
+                    t.paymentMethod || 'Tunai',
+                    i.qty,
+                    i.price,
+                    i.subtotal
+                ]);
+
+                totalQtyAll += i.qty;
+                totalRevenueAll += i.subtotal;
             });
+        });
 
-            rows.push([]);
-            rows.push([
-                "", "", "", "", "", "TOTAL KESELURUHAN:",
-                totalQtyAll,
-                "",
-                totalRevenueAll
-            ]);
+        rows.push([]);
 
-            const worksheet = XLSX.utils.aoa_to_sheet(rows);
+        rows.push([
+            "",
+            "",
+            "",
+            "",
+            "",
+            "TOTAL KESELURUHAN:",
+            totalQtyAll,
+            "",
+            totalRevenueAll
+        ]);
 
-            worksheet['!cols'] = [
-                { wch: 6 },
-                { wch: 18 },
-                { wch: 15 },
-                { wch: 30 },
-                { wch: 18 },
-                { wch: 15 },
-                { wch: 8 },
-                { wch: 18 },
-                { wch: 18 }
-            ];
+        const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Menu Terjual");
-            XLSX.writeFile(workbook, `Laporan_Penjualan_${todayStr}.xlsx`);
-        }
+        worksheet['!cols'] = [
+            { wch: 6 },
+            { wch: 18 },
+            { wch: 15 },
+            { wch: 30 },
+            { wch: 18 },
+            { wch: 15 },
+            { wch: 8 },
+            { wch: 18 },
+            { wch: 18 }
+        ];
+
+        const workbook = XLSX.utils.book_new();
+
+        XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            "Menu Terjual"
+        );
+
+        await saveExcelUniversal(
+            workbook,
+            `Laporan_Penjualan_${todayStr}.xlsx`
+        );
+
+    } catch (e) {
+        console.error(e);
+        alert('Gagal membuat file Excel: ' + e.message);
+    }
+            }
 
         function renderDailyExpensesTab() {
             return `
@@ -2328,52 +2489,92 @@
             `;
         }
 
-        function handleExportDailyExpenses() {
-            if (typeof XLSX === 'undefined') {
-                alert('Library Excel belum dimuat!');
-                return;
-            }
+        async function handleExportDailyExpenses() {
+    if (typeof XLSX === 'undefined') {
+        alert('Library Excel belum dimuat!');
+        return;
+    }
 
-            const todayStr = getTodayDateString();
-            const rows = [];
+    try {
+        const todayStr = getTodayDateString();
+        const rows = [];
 
-            rows.push([state.settings.storeName.toUpperCase()]);
-            rows.push(["LAPORAN BELANJA & PENGELUARAN HARIAN"]);
-            rows.push([`Tanggal Export: ${todayStr}`]);
-            rows.push([]);
+        rows.push([
+            state.settings.storeName.toUpperCase()
+        ]);
 
-            rows.push(["No", "Nama Belanja / Pengeluaran", "Qty", "Harga Satuan (Rp)", "Total Nominal (Rp)"]);
+        rows.push([
+            "LAPORAN BELANJA & PENGELUARAN HARIAN"
+        ]);
 
-            let totalExpense = 0;
-            state.expenses.forEach((e, index) => {
-                const qty = e.qty || 1;
-                const price = e.price || e.amount;
-                rows.push([
-                    index + 1,
-                    e.name,
-                    qty,
-                    price,
-                    e.amount
-                ]);
-                totalExpense += e.amount;
-            });
+        rows.push([
+            `Tanggal Export: ${todayStr}`
+        ]);
 
-            rows.push([]);
-            rows.push(["", "", "", "TOTAL PENGELUARAN:", totalExpense]);
+        rows.push([]);
 
-            const worksheet = XLSX.utils.aoa_to_sheet(rows);
+        rows.push([
+            "No",
+            "Nama Belanja / Pengeluaran",
+            "Qty",
+            "Harga Satuan (Rp)",
+            "Total Nominal (Rp)"
+        ]);
 
-            worksheet['!cols'] = [
-                { wch: 6 },
-                { wch: 35 },
-                { wch: 8 },
-                { wch: 18 },
-                { wch: 20 }
-            ];
+        let totalExpense = 0;
 
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Belanja Harian");
-            XLSX.writeFile(workbook, `Laporan_Belanja_${todayStr}.xlsx`);
+        state.expenses.forEach((e, index) => {
+            const qty = e.qty || 1;
+            const price = e.price || e.amount;
+
+            rows.push([
+                index + 1,
+                e.name,
+                qty,
+                price,
+                e.amount
+            ]);
+
+            totalExpense += e.amount;
+        });
+
+        rows.push([]);
+
+        rows.push([
+            "",
+            "",
+            "",
+            "TOTAL PENGELUARAN:",
+            totalExpense
+        ]);
+
+        const worksheet = XLSX.utils.aoa_to_sheet(rows);
+
+        worksheet['!cols'] = [
+            { wch: 6 },
+            { wch: 35 },
+            { wch: 8 },
+            { wch: 18 },
+            { wch: 20 }
+        ];
+
+        const workbook = XLSX.utils.book_new();
+
+        XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            "Belanja Harian"
+        );
+
+        await saveExcelUniversal(
+            workbook,
+            `Laporan_Belanja_${todayStr}.xlsx`
+        );
+
+    } catch (e) {
+        console.error(e);
+        alert('Gagal membuat file Excel: ' + e.message);
+    }
         }
 
         function renderReportsTab() {
