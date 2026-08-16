@@ -2151,35 +2151,30 @@
         }
         async function saveExcelUniversal(workbook, fileName) {
     try {
-        /*
-         * ==========================================
-         * MODE APK CAPACITOR
-         * ==========================================
-         */
-
         const Capacitor = window.Capacitor;
 
+        /*
+         * ========================================
+         * APK ANDROID
+         * ========================================
+         */
         if (
             Capacitor &&
             Capacitor.isNativePlatform &&
             Capacitor.isNativePlatform()
         ) {
-            const Filesystem =
+            const DownloadFile =
                 Capacitor.Plugins &&
-                Capacitor.Plugins.Filesystem;
+                Capacitor.Plugins.DownloadFile;
 
-            const Share =
-                Capacitor.Plugins &&
-                Capacitor.Plugins.Share;
-
-            if (!Filesystem) {
+            if (!DownloadFile) {
                 throw new Error(
-                    'Plugin Filesystem belum tersedia di APK.'
+                    'Plugin DownloadFile belum tersedia.'
                 );
             }
 
             /*
-             * Buat XLSX menjadi ArrayBuffer
+             * XLSX → ArrayBuffer
              */
             const excelArrayBuffer = XLSX.write(
                 workbook,
@@ -2192,9 +2187,8 @@
             /*
              * ArrayBuffer → Base64
              */
-            const bytes = new Uint8Array(
-                excelArrayBuffer
-            );
+            const bytes =
+                new Uint8Array(excelArrayBuffer);
 
             let binary = '';
 
@@ -2220,43 +2214,30 @@
                 btoa(binary);
 
             /*
-             * Simpan ke folder Documents
+             * Simpan langsung ke Android/Download
              */
             const result =
-                await Filesystem.writeFile({
-                    path: fileName,
+                await DownloadFile.save({
+                    fileName: fileName,
                     data: base64,
-                    directory: 'DOCUMENTS',
-                    recursive: true
+                    mimeType:
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                 });
 
-            /*
-             * Buka menu Share Android
-             */
-            if (Share && result.uri) {
-                await Share.share({
-                    title: 'Export Excel',
-                    text: 'Laporan Excel Bakso Master',
-                    url: result.uri,
-                    dialogTitle:
-                        'Buka atau bagikan file Excel'
-                });
-            } else {
-                alert(
-                    'File Excel berhasil disimpan:\n\n' +
-                    fileName
-                );
-            }
+            alert(
+                '✅ File Excel berhasil disimpan!\n\n' +
+                'Lokasi: Download\n' +
+                'Nama: ' + result.fileName
+            );
 
             return;
         }
 
         /*
-         * ==========================================
-         * MODE WEBSITE / GITHUB PAGES
-         * ==========================================
+         * ========================================
+         * GITHUB PAGES / BROWSER
+         * ========================================
          */
-
         XLSX.writeFile(
             workbook,
             fileName
@@ -2269,7 +2250,7 @@
         );
 
         alert(
-            'Gagal menyimpan file Excel.\n\n' +
+            '❌ Gagal menyimpan file Excel.\n\n' +
             error.message
         );
     }
