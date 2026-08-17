@@ -221,8 +221,6 @@ jobs:
           @CapacitorPlugin(name = "BluetoothPrinter")
           public class BluetoothPrinterPlugin extends Plugin {
 
-              private static final int REQUEST_BLUETOOTH = 2001;
-
               private BluetoothSocket bluetoothSocket;
               private OutputStream outputStream;
 
@@ -242,6 +240,7 @@ jobs:
 
                   return true;
               }
+              
 
               @PluginMethod
               public void requestPermission(PluginCall call) {
@@ -251,10 +250,10 @@ jobs:
                       if (!hasBluetoothPermission()) {
 
                           requestPermissionForAlias(
-                              "bluetooth",
-                              call,
-                              REQUEST_BLUETOOTH
-                          );
+    "bluetooth",
+    call,
+    "permissionCallback"
+);
 
                           return;
                       }
@@ -266,6 +265,19 @@ jobs:
 
                   call.resolve(result);
               }
+              @com.getcapacitor.annotation.PermissionCallback
+private void permissionCallback(PluginCall call) {
+
+    JSObject result = new JSObject();
+
+    result.put("granted", hasBluetoothPermission());
+
+    if (hasBluetoothPermission()) {
+        call.resolve(result);
+    } else {
+        call.reject("Izin Bluetooth ditolak.");
+    }
+}
 
               @PluginMethod
               public void getPairedPrinters(PluginCall call) {
