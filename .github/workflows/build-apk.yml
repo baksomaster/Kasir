@@ -23,175 +23,7 @@ jobs:
         run: npx cap add android
 
       - name: Buat folder plugin native
-        run: |
-          mkdir -p android/app/src/main/java/com/baksomaster/pos
-
-      - name: Buat DownloadFilePlugin
-        run: |
-          cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
-          package com.baksomaster.pos;
-
-          import android.content.ContentValues;
-          import android.net.Uri;
-          import android.os.Build;
-          import android.os.Environment;
-          import android.provider.MediaStore;
-          import android.util.Base64;
-
-          import com.getcapacitor.JSObject;
-          import com.getcapacitor.Plugin;
-          import com.getcapacitor.PluginCall;
-          import com.getcapacitor.PluginMethod;
-          import com.getcapacitor.annotation.CapacitorPlugin;
-
-          import java.io.FileOutputStream;
-          import java.io.OutputStream;
-
-          @CapacitorPlugin(name = "DownloadFile")
-          public class DownloadFilePlugin extends Plugin {
-
-              @PluginMethod
-              public void save(PluginCall call) {
-
-                  String fileName = call.getString("fileName");
-                  String base64 = call.getString("data");
-                  String mimeType = call.getString(
-                      "mimeType",
-                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  );
-
-                  if (fileName == null || fileName.trim().isEmpty()) {
-                      call.reject("Nama file tidak boleh kosong.");
-                      return;
-                  }
-
-                  if (base64 == null || base64.isEmpty()) {
-                      call.reject("Data file kosong.");
-                      return;
-                  }
-
-                  try {
-                      byte[] data = Base64.decode(
-                          base64,
-                          Base64.DEFAULT
-                      );
-
-                      Uri uri;
-
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-
-                          ContentValues values = new ContentValues();
-
-                          values.put(
-                              MediaStore.Downloads.DISPLAY_NAME,
-                              fileName
-                          );
-
-                          values.put(
-                              MediaStore.Downloads.MIME_TYPE,
-                              mimeType
-                          );
-
-                          values.put(
-                              MediaStore.Downloads.RELATIVE_PATH,
-                              Environment.DIRECTORY_DOWNLOADS
-                          );
-
-                          values.put(
-                              MediaStore.Downloads.IS_PENDING,
-                              1
-                          );
-
-                          uri = getContext()
-                              .getContentResolver()
-                              .insert(
-                                  MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                                  values
-                              );
-
-                          if (uri == null) {
-                              call.reject(
-                                  "Gagal membuat file di folder Download."
-                              );
-                              return;
-                          }
-
-                          try (OutputStream outputStream =
-                                   getContext()
-                                       .getContentResolver()
-                                       .openOutputStream(uri)) {
-
-                              if (outputStream == null) {
-                                  throw new Exception(
-                                      "Tidak dapat membuka file."
-                                  );
-                              }
-
-                              outputStream.write(data);
-                              outputStream.flush();
-                          }
-
-                          ContentValues completed =
-                              new ContentValues();
-
-                          completed.put(
-                              MediaStore.Downloads.IS_PENDING,
-                              0
-                          );
-
-                          getContext()
-                              .getContentResolver()
-                              .update(
-                                  uri,
-                                  completed,
-                                  null,
-                                  null
-                              );
-
-                      } else {
-
-                          java.io.File downloadDir =
-                              Environment.getExternalStoragePublicDirectory(
-                                  Environment.DIRECTORY_DOWNLOADS
-                              );
-
-                          if (!downloadDir.exists()) {
-                              downloadDir.mkdirs();
-                          }
-
-                          java.io.File file =
-                              new java.io.File(
-                                  downloadDir,
-                                  fileName
-                              );
-
-                          try (FileOutputStream outputStream =
-                                   new FileOutputStream(file)) {
-
-                              outputStream.write(data);
-                              outputStream.flush();
-                          }
-
-                          uri = Uri.fromFile(file);
-                      }
-
-                      JSObject result = new JSObject();
-
-                      result.put("fileName", fileName);
-                      result.put("uri", uri.toString());
-                      result.put("location", "Download");
-
-                      call.resolve(result);
-
-                  } catch (Exception e) {
-                      call.reject(
-                          "Gagal menyimpan file: " + e.getMessage(),
-                          e
-                      );
-                  }
-              }
-          }
-          EOF
+        run: mkdir -p android/app/src/main/java/com/baksomaster/pos
 
       - name: Buat BluetoothPrinterPlugin
         run: |
@@ -211,18 +43,28 @@ jobs:
           import com.getcapacitor.PluginCall;
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
+          import com.getcapacitor.annotation.Permission;
+          import com.getcapacitor.annotation.PermissionCallback;
 
-          import java.io.IOException;
           import java.io.OutputStream;
-          import java.util.ArrayList;
-          import java.util.List;
           import java.util.UUID;
 
-          @CapacitorPlugin(name = "BluetoothPrinter")
+          @CapacitorPlugin(
+              name = "BluetoothPrinter",
+              permissions = {
+                  @Permission(
+                      alias = "bluetooth",
+                      strings = {
+                          Manifest.permission.BLUETOOTH_CONNECT,
+                          Manifest.permission.BLUETOOTH_SCAN
+                      }
+                  )
+              }
+          )
           public class BluetoothPrinterPlugin extends Plugin {
 
-              private BluetoothSocket bluetoothSocket;
-              private OutputStream outputStream;
+              private BluetoothSocket socket;
+              private OutputStream output;
 
               private static final UUID SPP_UUID =
                   UUID.fromString(
@@ -240,54 +82,49 @@ jobs:
 
                   return true;
               }
-              
 
               @PluginMethod
               public void requestPermission(PluginCall call) {
 
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  if (
+                      Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                      !hasBluetoothPermission()
+                  ) {
 
-                      if (!hasBluetoothPermission()) {
+                      requestPermissionForAlias(
+                          "bluetooth",
+                          call,
+                          "permissionCallback"
+                      );
 
-                          requestPermissionForAlias(
-    "bluetooth",
-    call,
-    "permissionCallback"
-);
-
-                          return;
-                      }
+                      return;
                   }
 
                   JSObject result = new JSObject();
-
                   result.put("granted", true);
-
                   call.resolve(result);
               }
-              @com.getcapacitor.annotation.PermissionCallback
-private void permissionCallback(PluginCall call) {
 
-    JSObject result = new JSObject();
+              @PermissionCallback
+              private void permissionCallback(PluginCall call) {
 
-    result.put("granted", hasBluetoothPermission());
+                  boolean granted = hasBluetoothPermission();
 
-    if (hasBluetoothPermission()) {
-        call.resolve(result);
-    } else {
-        call.reject("Izin Bluetooth ditolak.");
-    }
-}
+                  JSObject result = new JSObject();
+                  result.put("granted", granted);
+
+                  if (granted) {
+                      call.resolve(result);
+                  } else {
+                      call.reject("Izin Bluetooth ditolak.");
+                  }
+              }
 
               @PluginMethod
               public void getPairedPrinters(PluginCall call) {
 
                   if (!hasBluetoothPermission()) {
-
-                      call.reject(
-                          "Izin Bluetooth belum diberikan."
-                      );
-
+                      call.reject("Izin Bluetooth belum diberikan.");
                       return;
                   }
 
@@ -297,33 +134,27 @@ private void permissionCallback(PluginCall call) {
                           BluetoothAdapter.getDefaultAdapter();
 
                       if (adapter == null) {
-
                           call.reject(
                               "HP tidak mendukung Bluetooth."
                           );
-
                           return;
                       }
 
                       if (!adapter.isEnabled()) {
-
                           call.reject(
                               "Bluetooth HP belum dinyalakan."
                           );
-
                           return;
                       }
 
-                      JSArray devices =
-                          new JSArray();
+                      JSArray devices = new JSArray();
 
                       for (
                           BluetoothDevice device :
                           adapter.getBondedDevices()
                       ) {
 
-                          JSObject item =
-                              new JSObject();
+                          JSObject item = new JSObject();
 
                           item.put(
                               "name",
@@ -340,8 +171,7 @@ private void permissionCallback(PluginCall call) {
                           devices.put(item);
                       }
 
-                      JSObject result =
-                          new JSObject();
+                      JSObject result = new JSObject();
 
                       result.put(
                           "devices",
@@ -364,11 +194,9 @@ private void permissionCallback(PluginCall call) {
               public void connect(PluginCall call) {
 
                   if (!hasBluetoothPermission()) {
-
                       call.reject(
                           "Izin Bluetooth belum diberikan."
                       );
-
                       return;
                   }
 
@@ -379,11 +207,9 @@ private void permissionCallback(PluginCall call) {
                       address == null ||
                       address.trim().isEmpty()
                   ) {
-
                       call.reject(
                           "Alamat printer tidak ditemukan."
                       );
-
                       return;
                   }
 
@@ -397,24 +223,24 @@ private void permissionCallback(PluginCall call) {
                           BluetoothDevice device =
                               adapter.getRemoteDevice(address);
 
-                          if (bluetoothSocket != null) {
+                          if (socket != null) {
 
                               try {
-                                  bluetoothSocket.close();
+                                  socket.close();
                               } catch (Exception ignored) {}
                           }
 
-                          bluetoothSocket =
+                          adapter.cancelDiscovery();
+
+                          socket =
                               device.createRfcommSocketToServiceRecord(
                                   SPP_UUID
                               );
 
-                          adapter.cancelDiscovery();
+                          socket.connect();
 
-                          bluetoothSocket.connect();
-
-                          outputStream =
-                              bluetoothSocket.getOutputStream();
+                          output =
+                              socket.getOutputStream();
 
                           JSObject result =
                               new JSObject();
@@ -440,16 +266,14 @@ private void permissionCallback(PluginCall call) {
 
                           try {
 
-                              if (
-                                  bluetoothSocket != null
-                              ) {
-                                  bluetoothSocket.close();
+                              if (socket != null) {
+                                  socket.close();
                               }
 
                           } catch (Exception ignored) {}
 
-                          bluetoothSocket = null;
-                          outputStream = null;
+                          socket = null;
+                          output = null;
 
                           call.reject(
                               "Gagal terhubung ke printer: " +
@@ -466,14 +290,14 @@ private void permissionCallback(PluginCall call) {
 
                   try {
 
-                      if (bluetoothSocket != null) {
-                          bluetoothSocket.close();
+                      if (socket != null) {
+                          socket.close();
                       }
 
                   } catch (Exception ignored) {}
 
-                  bluetoothSocket = null;
-                  outputStream = null;
+                  socket = null;
+                  output = null;
 
                   JSObject result =
                       new JSObject();
@@ -494,8 +318,8 @@ private void permissionCallback(PluginCall call) {
 
                   result.put(
                       "connected",
-                      bluetoothSocket != null &&
-                      bluetoothSocket.isConnected()
+                      socket != null &&
+                      socket.isConnected()
                   );
 
                   call.resolve(result);
@@ -505,9 +329,9 @@ private void permissionCallback(PluginCall call) {
               public void print(PluginCall call) {
 
                   if (
-                      bluetoothSocket == null ||
-                      !bluetoothSocket.isConnected() ||
-                      outputStream == null
+                      socket == null ||
+                      !socket.isConnected() ||
+                      output == null
                   ) {
 
                       call.reject(
@@ -517,12 +341,12 @@ private void permissionCallback(PluginCall call) {
                       return;
                   }
 
-                  String base64 =
+                  String data =
                       call.getString("data");
 
                   if (
-                      base64 == null ||
-                      base64.isEmpty()
+                      data == null ||
+                      data.isEmpty()
                   ) {
 
                       call.reject(
@@ -536,14 +360,14 @@ private void permissionCallback(PluginCall call) {
 
                       try {
 
-                          byte[] data =
+                          byte[] bytes =
                               android.util.Base64.decode(
-                                  base64,
+                                  data,
                                   android.util.Base64.DEFAULT
                               );
 
-                          outputStream.write(data);
-                          outputStream.flush();
+                          output.write(bytes);
+                          output.flush();
 
                           JSObject result =
                               new JSObject();
@@ -569,6 +393,253 @@ private void permissionCallback(PluginCall call) {
           }
           EOF
 
+      - name: Buat DownloadFilePlugin
+        run: |
+          cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
+          package com.baksomaster.pos;
+
+          import android.content.ContentValues;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Environment;
+          import android.provider.MediaStore;
+          import android.util.Base64;
+
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.OutputStream;
+
+          @CapacitorPlugin(name = "DownloadFile")
+          public class DownloadFilePlugin extends Plugin {
+
+              @PluginMethod
+              public void save(PluginCall call) {
+
+                  String fileName =
+                      call.getString("fileName");
+
+                  String data =
+                      call.getString("data");
+
+                  String mimeType =
+                      call.getString(
+                          "mimeType",
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      );
+
+                  if (
+                      fileName == null ||
+                      fileName.trim().isEmpty()
+                  ) {
+
+                      call.reject(
+                          "Nama file tidak boleh kosong."
+                      );
+
+                      return;
+                  }
+
+                  if (
+                      data == null ||
+                      data.isEmpty()
+                  ) {
+
+                      call.reject(
+                          "Data file kosong."
+                      );
+
+                      return;
+                  }
+
+                  try {
+
+                      byte[] bytes =
+                          Base64.decode(
+                              data,
+                              Base64.DEFAULT
+                          );
+
+                      Uri uri;
+
+                      if (
+                          Build.VERSION.SDK_INT >=
+                          Build.VERSION_CODES.Q
+                      ) {
+
+                          ContentValues values =
+                              new ContentValues();
+
+                          values.put(
+                              MediaStore.Downloads.DISPLAY_NAME,
+                              fileName
+                          );
+
+                          values.put(
+                              MediaStore.Downloads.MIME_TYPE,
+                              mimeType
+                          );
+
+                          values.put(
+                              MediaStore.Downloads.RELATIVE_PATH,
+                              Environment.DIRECTORY_DOWNLOADS
+                          );
+
+                          values.put(
+                              MediaStore.Downloads.IS_PENDING,
+                              1
+                          );
+
+                          uri =
+                              getContext()
+                                  .getContentResolver()
+                                  .insert(
+                                      MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                      values
+                                  );
+
+                          if (uri == null) {
+
+                              call.reject(
+                                  "Gagal membuat file."
+                              );
+
+                              return;
+                          }
+
+                          try (
+                              OutputStream out =
+                                  getContext()
+                                      .getContentResolver()
+                                      .openOutputStream(uri)
+                          ) {
+
+                              if (out == null) {
+                                  throw new Exception(
+                                      "Tidak dapat membuka file."
+                                  );
+                              }
+
+                              out.write(bytes);
+                              out.flush();
+                          }
+
+                          ContentValues done =
+                              new ContentValues();
+
+                          done.put(
+                              MediaStore.Downloads.IS_PENDING,
+                              0
+                          );
+
+                          getContext()
+                              .getContentResolver()
+                              .update(
+                                  uri,
+                                  done,
+                                  null,
+                                  null
+                              );
+
+                      } else {
+
+                          File directory =
+                              Environment
+                                  .getExternalStoragePublicDirectory(
+                                      Environment.DIRECTORY_DOWNLOADS
+                                  );
+
+                          if (!directory.exists()) {
+                              directory.mkdirs();
+                          }
+
+                          File file =
+                              new File(
+                                  directory,
+                                  fileName
+                              );
+
+                          try (
+                              FileOutputStream out =
+                                  new FileOutputStream(file)
+                          ) {
+
+                              out.write(bytes);
+                              out.flush();
+                          }
+
+                          uri =
+                              Uri.fromFile(file);
+                      }
+
+                      JSObject result =
+                          new JSObject();
+
+                      result.put(
+                          "fileName",
+                          fileName
+                      );
+
+                      result.put(
+                          "uri",
+                          uri.toString()
+                      );
+
+                      result.put(
+                          "location",
+                          "Download"
+                      );
+
+                      call.resolve(result);
+
+                  } catch (Exception e) {
+
+                      call.reject(
+                          "Gagal menyimpan file: " +
+                          e.getMessage(),
+                          e
+                      );
+                  }
+              }
+          }
+          EOF
+
+      - name: Buat MainActivity
+        run: |
+          cat > android/app/src/main/java/com/baksomaster/pos/MainActivity.java <<'EOF'
+          package com.baksomaster.pos;
+
+          import android.os.Bundle;
+
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+
+              @Override
+              public void onCreate(
+                  Bundle savedInstanceState
+              ) {
+
+                  registerPlugin(
+                      DownloadFilePlugin.class
+                  );
+
+                  registerPlugin(
+                      BluetoothPrinterPlugin.class
+                  );
+
+                  super.onCreate(
+                      savedInstanceState
+                  );
+              }
+          }
+          EOF
+
       - name: Tambahkan permission Bluetooth
         run: |
           python3 - <<'PY'
@@ -587,75 +658,15 @@ private void permissionCallback(PluginCall call) {
               <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
           """
 
-          marker = "<application"
-
           if "android.permission.BLUETOOTH_CONNECT" not in text:
+
               text = text.replace(
-                  marker,
-                  permissions + "\n    " + marker,
+                  "<application",
+                  permissions + "\n    <application",
                   1
               )
 
-          manifest.write_text(text)
-          PY
-
-      - name: Buat MainActivity
-        run: |
-          cat > android/app/src/main/java/com/baksomaster/pos/MainActivity.java <<'EOF'
-          package com.baksomaster.pos;
-
-          import android.os.Bundle;
-
-          import com.getcapacitor.BridgeActivity;
-
-          public class MainActivity extends BridgeActivity {
-
-              @Override
-              public void onCreate(Bundle savedInstanceState) {
-
-                  registerPlugin(
-                      DownloadFilePlugin.class
-                  );
-
-                  registerPlugin(
-                      BluetoothPrinterPlugin.class
-                  );
-
-                  super.onCreate(
-                      savedInstanceState
-                  );
-              }
-          }
-          EOF
-
-      - name: Tambahkan konfigurasi permission Bluetooth
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          activity = Path(
-              "android/app/src/main/java/com/baksomaster/pos/BluetoothPrinterPlugin.java"
-          )
-
-          text = activity.read_text()
-
-          text = text.replace(
-              '@CapacitorPlugin(name = "BluetoothPrinter")',
-              '''@CapacitorPlugin(
-              name = "BluetoothPrinter",
-              permissions = {
-                  @com.getcapacitor.annotation.Permission(
-                      alias = "bluetooth",
-                      strings = {
-                          "android.permission.BLUETOOTH_CONNECT",
-                          "android.permission.BLUETOOTH_SCAN"
-                      }
-                  )
-              }
-          )'''
-          )
-
-          activity.write_text(text)
+              manifest.write_text(text)
           PY
 
       - name: Sinkronisasi Capacitor
