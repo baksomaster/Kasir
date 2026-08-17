@@ -8,46 +8,94 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. AMBIL KODE DARI REPOSITORY
+      # ============================================================
+
       - name: Ambil kode dari repository
         uses: actions/checkout@v4
+
+
+      # ============================================================
+      # 2. SIAPKAN NODE.JS
+      # ============================================================
 
       - name: Siapkan Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
+
+      # ============================================================
+      # 3. INSTALL DEPENDENCIES
+      # ============================================================
+
       - name: Install dependencies
         run: npm install
+
+
+      # ============================================================
+      # 4. INSTALL CAPACITOR ASSETS
+      # ============================================================
+
+      - name: Install Capacitor Assets
+        run: npm install @capacitor/assets --save-dev
+
+
+      # ============================================================
+      # 5. SIAPKAN LOGO BAKSO MASTER
+      #
+      # Repository Anda memiliki:
+      #
+      # icon.png
+      #
+      # File tersebut akan digunakan sebagai icon aplikasi.
+      # ============================================================
+
+      - name: Siapkan icon Bakso Master
+        run: |
+          mkdir -p assets
+          cp icon.png assets/icon.png
+
+
+      # ============================================================
+      # 6. TAMBAHKAN ANDROID
+      # ============================================================
 
       - name: Tambahkan Android
         run: npx cap add android
 
-      
-      - name: Ganti ikon aplikasi Bakso Master
+
+      # ============================================================
+      # 7. GENERATE ICON ANDROID
+      #
+      # Menggunakan:
+      # assets/icon.png
+      #
+      # sehingga icon Android berasal dari logo Bakso Master.
+      # ============================================================
+
+      - name: Generate icon Android Bakso Master
         run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
+          npx @capacitor/assets generate \
+            --android \
+            --iconBackgroundColor "#FFFFFF" \
+            --iconBackgroundColorDark "#FFFFFF"
 
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
 
-          convert icon.png -resize 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          convert icon.png -resize 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          convert icon.png -resize 96x96 android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          convert icon.png -resize 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          convert icon.png -resize 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-
-          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+      # ============================================================
+      # 8. BUAT FOLDER PLUGIN NATIVE
+      # ============================================================
 
       - name: Buat folder plugin native
-        run: mkdir -p android/app/src/main/java/com/baksomaster/pos
+        run: |
+          mkdir -p android/app/src/main/java/com/baksomaster/pos
+
+
+      # ============================================================
+      # 9. BUAT BLUETOOTH PRINTER PLUGIN
+      # ============================================================
 
       - name: Buat BluetoothPrinterPlugin
         run: |
@@ -126,21 +174,32 @@ jobs:
 
                   JSObject result = new JSObject();
                   result.put("granted", true);
+
                   call.resolve(result);
               }
 
               @PermissionCallback
               private void permissionCallback(PluginCall call) {
 
-                  boolean granted = hasBluetoothPermission();
+                  boolean granted =
+                      hasBluetoothPermission();
 
                   JSObject result = new JSObject();
-                  result.put("granted", granted);
+
+                  result.put(
+                      "granted",
+                      granted
+                  );
 
                   if (granted) {
+
                       call.resolve(result);
+
                   } else {
-                      call.reject("Izin Bluetooth ditolak.");
+
+                      call.reject(
+                          "Izin Bluetooth ditolak."
+                      );
                   }
               }
 
@@ -148,7 +207,11 @@ jobs:
               public void getPairedPrinters(PluginCall call) {
 
                   if (!hasBluetoothPermission()) {
-                      call.reject("Izin Bluetooth belum diberikan.");
+
+                      call.reject(
+                          "Izin Bluetooth belum diberikan."
+                      );
+
                       return;
                   }
 
@@ -158,27 +221,33 @@ jobs:
                           BluetoothAdapter.getDefaultAdapter();
 
                       if (adapter == null) {
+
                           call.reject(
                               "HP tidak mendukung Bluetooth."
                           );
+
                           return;
                       }
 
                       if (!adapter.isEnabled()) {
+
                           call.reject(
                               "Bluetooth HP belum dinyalakan."
                           );
+
                           return;
                       }
 
-                      JSArray devices = new JSArray();
+                      JSArray devices =
+                          new JSArray();
 
                       for (
                           BluetoothDevice device :
                           adapter.getBondedDevices()
                       ) {
 
-                          JSObject item = new JSObject();
+                          JSObject item =
+                              new JSObject();
 
                           item.put(
                               "name",
@@ -195,7 +264,8 @@ jobs:
                           devices.put(item);
                       }
 
-                      JSObject result = new JSObject();
+                      JSObject result =
+                          new JSObject();
 
                       result.put(
                           "devices",
@@ -218,9 +288,11 @@ jobs:
               public void connect(PluginCall call) {
 
                   if (!hasBluetoothPermission()) {
+
                       call.reject(
                           "Izin Bluetooth belum diberikan."
                       );
+
                       return;
                   }
 
@@ -231,9 +303,11 @@ jobs:
                       address == null ||
                       address.trim().isEmpty()
                   ) {
+
                       call.reject(
                           "Alamat printer tidak ditemukan."
                       );
+
                       return;
                   }
 
@@ -244,13 +318,26 @@ jobs:
                           BluetoothAdapter adapter =
                               BluetoothAdapter.getDefaultAdapter();
 
+                          if (adapter == null) {
+
+                              call.reject(
+                                  "HP tidak mendukung Bluetooth."
+                              );
+
+                              return;
+                          }
+
                           BluetoothDevice device =
-                              adapter.getRemoteDevice(address);
+                              adapter.getRemoteDevice(
+                                  address
+                              );
 
                           if (socket != null) {
 
                               try {
+
                                   socket.close();
+
                               } catch (Exception ignored) {}
                           }
 
@@ -417,6 +504,17 @@ jobs:
           }
           EOF
 
+
+      # ============================================================
+      # 10. BUAT DOWNLOAD FILE PLUGIN
+      #
+      # Digunakan untuk menyimpan Excel langsung ke:
+      #
+      # Penyimpanan HP / Download
+      #
+      # bukan hanya membuka menu Share.
+      # ============================================================
+
       - name: Buat DownloadFilePlugin
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
@@ -544,6 +642,7 @@ jobs:
                           ) {
 
                               if (out == null) {
+
                                   throw new Exception(
                                       "Tidak dapat membuka file."
                                   );
@@ -579,6 +678,7 @@ jobs:
                                   );
 
                           if (!directory.exists()) {
+
                               directory.mkdirs();
                           }
 
@@ -633,6 +733,11 @@ jobs:
           }
           EOF
 
+
+      # ============================================================
+      # 11. BUAT MAIN ACTIVITY
+      # ============================================================
+
       - name: Buat MainActivity
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/MainActivity.java <<'EOF'
@@ -664,6 +769,11 @@ jobs:
           }
           EOF
 
+
+      # ============================================================
+      # 12. TAMBAHKAN PERMISSION BLUETOOTH
+      # ============================================================
+
       - name: Tambahkan permission Bluetooth
         run: |
           python3 - <<'PY'
@@ -691,10 +801,21 @@ jobs:
               )
 
               manifest.write_text(text)
+
           PY
+
+
+      # ============================================================
+      # 13. SINKRONISASI CAPACITOR
+      # ============================================================
 
       - name: Sinkronisasi Capacitor
         run: npx cap sync android
+
+
+      # ============================================================
+      # 14. SIAPKAN JAVA 21
+      # ============================================================
 
       - name: Siapkan Java
         uses: actions/setup-java@v4
@@ -702,9 +823,19 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+
+      # ============================================================
+      # 15. BUILD APK
+      # ============================================================
+
       - name: Build APK
         working-directory: android
         run: ./gradlew assembleDebug
+
+
+      # ============================================================
+      # 16. SIMPAN APK SEBAGAI ARTIFACT
+      # ============================================================
 
       - name: Simpan APK
         uses: actions/upload-artifact@v4
