@@ -424,7 +424,7 @@
         function formatReceiptTextForRawBT(t) {
             if (!t) return '';
 
-            const storeName = state.settings.storeName || 'Bakso Master';
+            //const storeName = state.settings.storeName || 'Bakso Master';
             const address = state.settings.address || '';
             const phone = state.settings.phone || '';
             const footer = state.settings.receiptFooter || 'Terima Kasih Atas Kunjungan Anda!';
@@ -452,7 +452,7 @@
             const divider = '-'.repeat(WIDTH);
             let text = '';
 
-            text += centerText(storeName) + '\n';
+            //text += centerText(storeName) + '\n';
             if (address) {
                 const lines = address.split(',');
                 lines.forEach(l => text += centerText(l.trim()) + '\n');
@@ -587,7 +587,7 @@
             }
 
             const divider = '-'.repeat(WIDTH) + '\n';
-            const storeName = state.settings.storeName || 'Bakso Master';
+            //const storeName = state.settings.storeName || 'Bakso Master';
             const address = state.settings.address || '';
             const phone = state.settings.phone || '';
             const footer = state.settings.receiptFooter || 'Terima Kasih Atas Kunjungan Anda!';
@@ -596,11 +596,11 @@
             const taxTrx = (subtotalTrx * (state.settings.taxPercent || 0)) / 100;
             const qrisFeeTrx = t.qrisFee || (t.paymentMethod === 'QRIS' ? 1000 : 0);
 
-            addBytes(ESC_POS.INIT);
-            addBytes(ESC_POS.ALIGN_CENTER);
-            addBytes(ESC_POS.BOLD_ON);
-            addText(storeName + '\n');
-            addBytes(ESC_POS.BOLD_OFF);
+            //addBytes(ESC_POS.INIT);
+            //addBytes(ESC_POS.ALIGN_CENTER);
+            //addBytes(ESC_POS.BOLD_ON);
+            //addText(storeName + '\n');
+            //addBytes(ESC_POS.BOLD_OFF);
 
             if (address) {
                 address.split(',').forEach(l => addText(l.trim() + '\n'));
