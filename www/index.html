@@ -1237,27 +1237,54 @@
         }
 
         async function saveStateToSupabase() {
-            if (!supabaseClient) return;
-            try {
-                const dataToSave = {
-                    lastActiveDate: state.lastActiveDate,
-                    settings: state.settings,
-                    categories: state.categories,
-                    products: state.products,
-                    users: state.users,
-                    expenses: state.expenses,
-                    transactions: state.transactions,
-                    auditLogs: state.auditLogs
-                };
+    if (!supabaseClient) {
+        throw new Error('Koneksi Supabase belum tersedia.');
+    }
 
-                const { error } = await supabaseClient
-                    .from('app_store')
-                    .upsert({ id: 'main', payload: dataToSave, updated_at: new Date() });
+    try {
+        const dataToSave = {
+            lastActiveDate: state.lastActiveDate,
+            settings: state.settings,
+            categories: state.categories,
+            products: state.products,
+            users: state.users,
+            expenses: state.expenses,
+            transactions: state.transactions,
+            auditLogs: state.auditLogs
+        };
 
-                if (error) console.error("Gagal menyimpan ke Supabase:", error.message);
-            } catch (error) {
-                console.error("Kesalahan koneksi saat menyimpan:", error);
-            }
+        const { error } = await supabaseClient
+            .from('app_store')
+            .upsert({
+                id: 'main',
+                payload: dataToSave,
+                updated_at: new Date().toISOString()
+            });
+
+        if (error) {
+            console.error(
+                'Gagal menyimpan ke Supabase:',
+                error
+            );
+
+            throw new Error(
+                error.message || 'Gagal menyimpan data ke Supabase.'
+            );
+        }
+
+        console.log('Data berhasil disimpan ke Supabase.');
+
+        return true;
+
+    } catch (error) {
+
+        console.error(
+            'Kesalahan koneksi saat menyimpan:',
+            error
+        );
+
+        throw error;
+    }
         }
 
         async function resetDataToDefault() {
@@ -2913,65 +2940,322 @@
         }
 
         async function addUserPrompt() {
-            const name = prompt('Masukkan Nama Lengkap User:');
-            if (!name) return;
-            const username = prompt('Masukkan Username (untuk login):');
-            if (!username) return;
-            const password = prompt('Masukkan Password:');
-            if (!password) return;
-            const roleInput = prompt('Pilih Role (Admin / Kasir):', 'Kasir');
-            const role = (roleInput && roleInput.toLowerCase() === 'admin') ? 'Admin' : 'Kasir';
+    const name = prompt('Masukkan Nama Lengkap User:');
 
-            state.users.push({
-                id: `usr-${Date.now()}`,
-                username: username.trim(),
-                password: password.trim(),
-                name: name.trim(),
-                role: role,
-                active: true
+    if (!name || !name.trim()) return;
+
+    const username = prompt('Masukkan Username (untuk login):');
+
+    if (!username || !username.trim()) return;
+
+    const password = prompt('Masukkan Password:');
+
+    if (!password || !password.trim()) return;
+
+    const roleInput = prompt(
+        'Pilih Role (Admin / Kasir):',
+        'Kasir'
+    );
+
+    const role =
+        roleInput &&
+        roleInput.toLowerCase() === 'admin'
+            ? 'Admin'
+            : 'Kasir';
+
+    const cleanName = name.trim();
+    const cleanUsername = username.trim();
+    const cleanPassword = password.trim();
+
+    // Cegah username duplikat
+    const duplicate = state.users.some(
+        u =>
+            u.username &&
+            u.username.toLowerCase() ===
+            cleanUsername.toLowerCase()
+    );
+
+    if (duplicate) {
+        alert(
+            `Username "@${cleanUsername}" sudah digunakan.`
+        );
+        return;
+    }
+
+    const newUser = {
+        id: `usr-${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 7)}`,
+
+        username: cleanUsername,
+        password: cleanPassword,
+        name: cleanName,
+        role: role,
+        active: true
+    };
+
+    // Simpan perubahan lama untuk rollback
+    const oldUsers = JSON.parse(
+        JSON.stringify(state.users)
+    );
+
+    try {
+
+        state.users.push(newUser);
+
+        // Tambahkan audit log
+        if (state.currentUser) {
+            state.auditLogs.unshift({
+                id: `log-${Date.now()}`,
+                timestamp: getLocalTimeStr(),
+                user: state.currentUser.username,
+                action: 'TAMBAH_USER',
+                details:
+                    `Menambahkan user baru: @${cleanUsername} (${role})`
             });
-            await logActivity('TAMBAH_USER', `Menambahkan user baru: @${username} (${role})`);
-            await saveStateToSupabase();
-            render();
-            alert('User berhasil ditambahkan!');
+        }
+
+        // SATU kali penyimpanan
+        await saveStateToSupabase();
+
+        render();
+
+        alert(
+            `User "${cleanName}" berhasil ditambahkan.`
+        );
+
+    } catch (error) {
+
+        // Kembalikan data jika gagal
+        state.users = oldUsers;
+
+        console.error(
+            'Gagal menambahkan user:',
+            error
+        );
+
+        alert(
+            'User gagal disimpan ke cloud.\n\n' +
+            'Data tidak jadi ditambahkan.\n\n' +
+            'Penyebab: ' +
+            (error.message || error)
+        );
+
+        render();
+    }
         }
 
         async function editUserPrompt(id) {
-            const u = state.users.find(x => x.id === id);
-            if (!u) return;
-            const newName = prompt('Edit Nama:', u.name);
-            if (newName === null) return;
-            const newUsername = prompt('Edit Username:', u.username);
-            if (newUsername === null) return;
-            const newPassword = prompt('Edit Password (kosongkan jika tetap):', u.password);
-            if (newPassword === null) return;
-            const newRoleInput = prompt('Edit Role (Admin / Kasir):', u.role);
-            if (newRoleInput === null) return;
 
-            u.name = newName.trim() || u.name;
-            u.username = newUsername.trim() || u.username;
-            if (newPassword.trim() !== '') u.password = newPassword.trim();
-            u.role = newRoleInput.toLowerCase() === 'admin' ? 'Admin' : 'Kasir';
+    const u = state.users.find(
+        x => x.id === id
+    );
 
-            await logActivity('EDIT_USER', `Mengubah data user @${u.username}`);
-            await saveStateToSupabase();
-            render();
-            alert('Data user berhasil diperbarui!');
+    if (!u) {
+        alert('Data user tidak ditemukan.');
+        return;
+    }
+
+    const oldUser = JSON.parse(
+        JSON.stringify(u)
+    );
+
+    const newName = prompt(
+        'Edit Nama:',
+        u.name
+    );
+
+    if (newName === null) return;
+
+    const newUsername = prompt(
+        'Edit Username:',
+        u.username
+    );
+
+    if (newUsername === null) return;
+
+    const newPassword = prompt(
+        'Edit Password (kosongkan jika tetap):',
+        ''
+    );
+
+    if (newPassword === null) return;
+
+    const newRoleInput = prompt(
+        'Edit Role (Admin / Kasir):',
+        u.role
+    );
+
+    if (newRoleInput === null) return;
+
+    const cleanName =
+        newName.trim() || u.name;
+
+    const cleanUsername =
+        newUsername.trim() || u.username;
+
+    const newRole =
+        newRoleInput.toLowerCase() === 'admin'
+            ? 'Admin'
+            : 'Kasir';
+
+    // Cek username duplikat
+    const duplicate = state.users.some(
+        user =>
+            user.id !== id &&
+            user.username &&
+            user.username.toLowerCase() ===
+            cleanUsername.toLowerCase()
+    );
+
+    if (duplicate) {
+        alert(
+            `Username "@${cleanUsername}" sudah digunakan user lain.`
+        );
+        return;
+    }
+
+    try {
+
+        u.name = cleanName;
+        u.username = cleanUsername;
+
+        if (newPassword.trim() !== '') {
+            u.password = newPassword.trim();
+        }
+
+        u.role = newRole;
+
+        if (state.currentUser) {
+            state.auditLogs.unshift({
+                id: `log-${Date.now()}`,
+                timestamp: getLocalTimeStr(),
+                user: state.currentUser.username,
+                action: 'EDIT_USER',
+                details:
+                    `Mengubah data user @${u.username}`
+            });
+        }
+
+        await saveStateToSupabase();
+
+        render();
+
+        alert(
+            `Data user "${u.name}" berhasil diperbarui.`
+        );
+
+    } catch (error) {
+
+        // Rollback
+        Object.assign(u, oldUser);
+
+        console.error(
+            'Gagal mengedit user:',
+            error
+        );
+
+        alert(
+            'Perubahan user gagal disimpan.\n\n' +
+            'Data dikembalikan seperti semula.\n\n' +
+            'Penyebab: ' +
+            (error.message || error)
+        );
+
+        render();
+    }
         }
 
         async function deleteUser(id) {
-            const u = state.users.find(x => x.id === id);
-            if (!u) return;
-            if (state.currentUser && state.currentUser.id === id) {
-                alert('Tidak dapat menghapus akun yang sedang aktif digunakan!');
-                return;
-            }
-            if (confirm(`Hapus user "${u.name}"?`)) {
-                state.users = state.users.filter(x => x.id !== id);
-                await logActivity('HAPUS_USER', `Menghapus user: @${u.username}`);
-                await saveStateToSupabase();
-                render();
-            }
+
+    const u = state.users.find(
+        x => x.id === id
+    );
+
+    if (!u) {
+        alert('Data user tidak ditemukan.');
+        return;
+    }
+
+    if (
+        state.currentUser &&
+        state.currentUser.id === id
+    ) {
+        alert(
+            'Tidak dapat menghapus akun yang sedang aktif digunakan!'
+        );
+        return;
+    }
+
+    if (
+        state.users.filter(
+            user => user.active && user.role === 'Admin'
+        ).length <= 1 &&
+        u.role === 'Admin' &&
+        u.active
+    ) {
+        alert(
+            'Admin aktif terakhir tidak dapat dihapus.'
+        );
+        return;
+    }
+
+    if (
+        !confirm(
+            `Hapus user "${u.name}" (@${u.username})?\n\n` +
+            'Data akan dihapus dari cloud.'
+        )
+    ) {
+        return;
+    }
+
+    const oldUsers = JSON.parse(
+        JSON.stringify(state.users)
+    );
+
+    try {
+
+        state.users = state.users.filter(
+            x => x.id !== id
+        );
+
+        if (state.currentUser) {
+            state.auditLogs.unshift({
+                id: `log-${Date.now()}`,
+                timestamp: getLocalTimeStr(),
+                user: state.currentUser.username,
+                action: 'HAPUS_USER',
+                details:
+                    `Menghapus user @${u.username}`
+            });
+        }
+
+        await saveStateToSupabase();
+
+        render();
+
+        alert(
+            `User "${u.name}" berhasil dihapus.`
+        );
+
+    } catch (error) {
+
+        state.users = oldUsers;
+
+        console.error(
+            'Gagal menghapus user:',
+            error
+        );
+
+        alert(
+            'User gagal dihapus dari cloud.\n\n' +
+            'Data dikembalikan.\n\n' +
+            'Penyebab: ' +
+            (error.message || error)
+        );
+
+        render();
+    }
         }
 
         function renderSettingsTab() {
@@ -3441,12 +3725,49 @@
         }
 
         async function toggleUserActive(id) {
-            const u = state.users.find(x => x.id === id);
-            if (u) { 
-                u.active = !u.active; 
-                await saveStateToSupabase(); 
-                render(); 
-            }
+    const u = state.users.find(x => x.id === id);
+
+    if (!u) {
+        alert('Data user tidak ditemukan.');
+        return;
+    }
+
+    // Simpan status lama untuk rollback jika penyimpanan gagal
+    const oldStatus = u.active;
+
+    try {
+        // Ubah status
+        u.active = !oldStatus;
+
+        // Simpan ke Supabase
+        await saveStateToSupabase();
+
+        // Jika berhasil, tampilkan perubahan
+        render();
+
+        showToast(
+            `User ${u.active ? 'diaktifkan' : 'dinonaktifkan'}`
+        );
+
+    } catch (error) {
+
+        // Jika gagal, kembalikan status seperti semula
+        u.active = oldStatus;
+
+        console.error(
+            'Gagal mengubah status user:',
+            error
+        );
+
+        alert(
+            'Status user gagal disimpan.\n\n' +
+            'Perubahan dibatalkan.\n\n' +
+            'Penyebab: ' +
+            (error.message || error)
+        );
+
+        render();
+    }
         }
 
         async function handleSettingsSave(e) {
