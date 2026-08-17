@@ -22,11 +22,11 @@ jobs:
       - name: Tambahkan Android
         run: npx cap add android
 
-      - name: Buat folder plugin Download
+      - name: Buat folder plugin native
         run: |
           mkdir -p android/app/src/main/java/com/baksomaster/pos
 
-      - name: Buat plugin Download Native
+      - name: Buat DownloadFilePlugin
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
           package com.baksomaster.pos;
@@ -44,7 +44,6 @@ jobs:
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
 
-          import java.io.File;
           import java.io.FileOutputStream;
           import java.io.OutputStream;
 
@@ -151,7 +150,7 @@ jobs:
 
                       } else {
 
-                          File downloadDir =
+                          java.io.File downloadDir =
                               Environment.getExternalStoragePublicDirectory(
                                   Environment.DIRECTORY_DOWNLOADS
                               );
@@ -160,8 +159,8 @@ jobs:
                               downloadDir.mkdirs();
                           }
 
-                          File file =
-                              new File(
+                          java.io.File file =
+                              new java.io.File(
                                   downloadDir,
                                   fileName
                               );
@@ -178,27 +177,15 @@ jobs:
 
                       JSObject result = new JSObject();
 
-                      result.put(
-                          "fileName",
-                          fileName
-                      );
-
-                      result.put(
-                          "uri",
-                          uri.toString()
-                      );
-
-                      result.put(
-                          "location",
-                          "Download"
-                      );
+                      result.put("fileName", fileName);
+                      result.put("uri", uri.toString());
+                      result.put("location", "Download");
 
                       call.resolve(result);
 
                   } catch (Exception e) {
                       call.reject(
-                          "Gagal menyimpan file: " +
-                          e.getMessage(),
+                          "Gagal menyimpan file: " + e.getMessage(),
                           e
                       );
                   }
@@ -206,7 +193,401 @@ jobs:
           }
           EOF
 
-      - name: Daftarkan plugin Download
+      - name: Buat BluetoothPrinterPlugin
+        run: |
+          cat > android/app/src/main/java/com/baksomaster/pos/BluetoothPrinterPlugin.java <<'EOF'
+          package com.baksomaster.pos;
+
+          import android.Manifest;
+          import android.bluetooth.BluetoothAdapter;
+          import android.bluetooth.BluetoothDevice;
+          import android.bluetooth.BluetoothSocket;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+
+          import com.getcapacitor.JSArray;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          import java.io.IOException;
+          import java.io.OutputStream;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.UUID;
+
+          @CapacitorPlugin(name = "BluetoothPrinter")
+          public class BluetoothPrinterPlugin extends Plugin {
+
+              private static final int REQUEST_BLUETOOTH = 2001;
+
+              private BluetoothSocket bluetoothSocket;
+              private OutputStream outputStream;
+
+              private static final UUID SPP_UUID =
+                  UUID.fromString(
+                      "00001101-0000-1000-8000-00805F9B34FB"
+                  );
+
+              private boolean hasBluetoothPermission() {
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+                      return getContext().checkSelfPermission(
+                          Manifest.permission.BLUETOOTH_CONNECT
+                      ) == PackageManager.PERMISSION_GRANTED;
+                  }
+
+                  return true;
+              }
+
+              @PluginMethod
+              public void requestPermission(PluginCall call) {
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+                      if (!hasBluetoothPermission()) {
+
+                          requestPermissionForAlias(
+                              "bluetooth",
+                              call,
+                              REQUEST_BLUETOOTH
+                          );
+
+                          return;
+                      }
+                  }
+
+                  JSObject result = new JSObject();
+
+                  result.put("granted", true);
+
+                  call.resolve(result);
+              }
+
+              @PluginMethod
+              public void getPairedPrinters(PluginCall call) {
+
+                  if (!hasBluetoothPermission()) {
+
+                      call.reject(
+                          "Izin Bluetooth belum diberikan."
+                      );
+
+                      return;
+                  }
+
+                  try {
+
+                      BluetoothAdapter adapter =
+                          BluetoothAdapter.getDefaultAdapter();
+
+                      if (adapter == null) {
+
+                          call.reject(
+                              "HP tidak mendukung Bluetooth."
+                          );
+
+                          return;
+                      }
+
+                      if (!adapter.isEnabled()) {
+
+                          call.reject(
+                              "Bluetooth HP belum dinyalakan."
+                          );
+
+                          return;
+                      }
+
+                      JSArray devices =
+                          new JSArray();
+
+                      for (
+                          BluetoothDevice device :
+                          adapter.getBondedDevices()
+                      ) {
+
+                          JSObject item =
+                              new JSObject();
+
+                          item.put(
+                              "name",
+                              device.getName() != null
+                                  ? device.getName()
+                                  : "Bluetooth Printer"
+                          );
+
+                          item.put(
+                              "address",
+                              device.getAddress()
+                          );
+
+                          devices.put(item);
+                      }
+
+                      JSObject result =
+                          new JSObject();
+
+                      result.put(
+                          "devices",
+                          devices
+                      );
+
+                      call.resolve(result);
+
+                  } catch (Exception e) {
+
+                      call.reject(
+                          "Gagal membaca printer: " +
+                          e.getMessage(),
+                          e
+                      );
+                  }
+              }
+
+              @PluginMethod
+              public void connect(PluginCall call) {
+
+                  if (!hasBluetoothPermission()) {
+
+                      call.reject(
+                          "Izin Bluetooth belum diberikan."
+                      );
+
+                      return;
+                  }
+
+                  String address =
+                      call.getString("address");
+
+                  if (
+                      address == null ||
+                      address.trim().isEmpty()
+                  ) {
+
+                      call.reject(
+                          "Alamat printer tidak ditemukan."
+                      );
+
+                      return;
+                  }
+
+                  new Thread(() -> {
+
+                      try {
+
+                          BluetoothAdapter adapter =
+                              BluetoothAdapter.getDefaultAdapter();
+
+                          BluetoothDevice device =
+                              adapter.getRemoteDevice(address);
+
+                          if (bluetoothSocket != null) {
+
+                              try {
+                                  bluetoothSocket.close();
+                              } catch (Exception ignored) {}
+                          }
+
+                          bluetoothSocket =
+                              device.createRfcommSocketToServiceRecord(
+                                  SPP_UUID
+                              );
+
+                          adapter.cancelDiscovery();
+
+                          bluetoothSocket.connect();
+
+                          outputStream =
+                              bluetoothSocket.getOutputStream();
+
+                          JSObject result =
+                              new JSObject();
+
+                          result.put(
+                              "connected",
+                              true
+                          );
+
+                          result.put(
+                              "name",
+                              device.getName()
+                          );
+
+                          result.put(
+                              "address",
+                              device.getAddress()
+                          );
+
+                          call.resolve(result);
+
+                      } catch (Exception e) {
+
+                          try {
+
+                              if (
+                                  bluetoothSocket != null
+                              ) {
+                                  bluetoothSocket.close();
+                              }
+
+                          } catch (Exception ignored) {}
+
+                          bluetoothSocket = null;
+                          outputStream = null;
+
+                          call.reject(
+                              "Gagal terhubung ke printer: " +
+                              e.getMessage(),
+                              e
+                          );
+                      }
+
+                  }).start();
+              }
+
+              @PluginMethod
+              public void disconnect(PluginCall call) {
+
+                  try {
+
+                      if (bluetoothSocket != null) {
+                          bluetoothSocket.close();
+                      }
+
+                  } catch (Exception ignored) {}
+
+                  bluetoothSocket = null;
+                  outputStream = null;
+
+                  JSObject result =
+                      new JSObject();
+
+                  result.put(
+                      "connected",
+                      false
+                  );
+
+                  call.resolve(result);
+              }
+
+              @PluginMethod
+              public void getStatus(PluginCall call) {
+
+                  JSObject result =
+                      new JSObject();
+
+                  result.put(
+                      "connected",
+                      bluetoothSocket != null &&
+                      bluetoothSocket.isConnected()
+                  );
+
+                  call.resolve(result);
+              }
+
+              @PluginMethod
+              public void print(PluginCall call) {
+
+                  if (
+                      bluetoothSocket == null ||
+                      !bluetoothSocket.isConnected() ||
+                      outputStream == null
+                  ) {
+
+                      call.reject(
+                          "Printer belum terhubung."
+                      );
+
+                      return;
+                  }
+
+                  String base64 =
+                      call.getString("data");
+
+                  if (
+                      base64 == null ||
+                      base64.isEmpty()
+                  ) {
+
+                      call.reject(
+                          "Data cetak kosong."
+                      );
+
+                      return;
+                  }
+
+                  new Thread(() -> {
+
+                      try {
+
+                          byte[] data =
+                              android.util.Base64.decode(
+                                  base64,
+                                  android.util.Base64.DEFAULT
+                              );
+
+                          outputStream.write(data);
+                          outputStream.flush();
+
+                          JSObject result =
+                              new JSObject();
+
+                          result.put(
+                              "success",
+                              true
+                          );
+
+                          call.resolve(result);
+
+                      } catch (Exception e) {
+
+                          call.reject(
+                              "Gagal mencetak: " +
+                              e.getMessage(),
+                              e
+                          );
+                      }
+
+                  }).start();
+              }
+          }
+          EOF
+
+      - name: Tambahkan permission Bluetooth
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+          text = manifest.read_text()
+
+          permissions = """
+              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+          """
+
+          marker = "<application"
+
+          if "android.permission.BLUETOOTH_CONNECT" not in text:
+              text = text.replace(
+                  marker,
+                  permissions + "\n    " + marker,
+                  1
+              )
+
+          manifest.write_text(text)
+          PY
+
+      - name: Buat MainActivity
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/MainActivity.java <<'EOF'
           package com.baksomaster.pos;
@@ -219,11 +600,51 @@ jobs:
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
-                  registerPlugin(DownloadFilePlugin.class);
-                  super.onCreate(savedInstanceState);
+
+                  registerPlugin(
+                      DownloadFilePlugin.class
+                  );
+
+                  registerPlugin(
+                      BluetoothPrinterPlugin.class
+                  );
+
+                  super.onCreate(
+                      savedInstanceState
+                  );
               }
           }
           EOF
+
+      - name: Tambahkan konfigurasi permission Bluetooth
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          activity = Path(
+              "android/app/src/main/java/com/baksomaster/pos/BluetoothPrinterPlugin.java"
+          )
+
+          text = activity.read_text()
+
+          text = text.replace(
+              '@CapacitorPlugin(name = "BluetoothPrinter")',
+              '''@CapacitorPlugin(
+              name = "BluetoothPrinter",
+              permissions = {
+                  @com.getcapacitor.annotation.Permission(
+                      alias = "bluetooth",
+                      strings = {
+                          "android.permission.BLUETOOTH_CONNECT",
+                          "android.permission.BLUETOOTH_SCAN"
+                      }
+                  )
+              }
+          )'''
+          )
+
+          activity.write_text(text)
+          PY
 
       - name: Sinkronisasi Capacitor
         run: npx cap sync android
