@@ -22,6 +22,44 @@ jobs:
       - name: Tambahkan Android
         run: npx cap add android
 
+      - name: Siapkan ikon aplikasi
+        run: |
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+
+          source = Path("icon.png")
+          image = Image.open(source).convert("RGBA")
+
+          sizes = {
+              "mdpi": 48,
+              "hdpi": 72,
+              "xhdpi": 96,
+              "xxhdpi": 144,
+              "xxxhdpi": 192
+          }
+
+          for density, size in sizes.items():
+              output = Path(
+                  f"android/app/src/main/res/mipmap-{density}/ic_launcher.png"
+              )
+
+              resized = image.resize(
+                  (size, size),
+                  Image.Resampling.LANCZOS
+              )
+
+              resized.save(output)
+
+          print("Ikon aplikasi berhasil dibuat.")
+          PY
+
       - name: Buat folder plugin native
         run: mkdir -p android/app/src/main/java/com/baksomaster/pos
 
@@ -608,6 +646,25 @@ jobs:
               }
           }
           EOF
+
+      - name: Atur ikon aplikasi
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+          text = manifest.read_text()
+
+          text = text.replace(
+              'android:icon="@mipmap/ic_launcher"',
+              'android:icon="@mipmap/ic_launcher"'
+          )
+
+          manifest.write_text(text)
+          PY
 
       - name: Buat MainActivity
         run: |
