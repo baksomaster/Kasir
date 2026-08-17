@@ -1261,15 +1261,70 @@
         }
 
         async function resetDataToDefault() {
-            if (confirm("Apakah Anda yakin ingin mengembalikan semua data ke pengaturan awal? Semua perubahan akan diset ulang di semua HP kasir/admin!")) {
-                state = JSON.parse(JSON.stringify(defaultState));
-                state.lastActiveDate = getTodayDateString();
-                localStorage.removeItem('bakso_master_current_user');
-                await saveStateToSupabase();
-                alert("Data berhasil di-reset ke default!");
-                render();
-            }
-        }
+    if (!state.currentUser || state.currentUser.role !== 'admin') {
+        alert('Hanya Admin yang dapat melakukan reset data.');
+        return;
+    }
+
+    if (!confirm(
+        "Reset data operasional?\n\n" +
+        "Kategori, Menu, dan User TIDAK akan dihapus.\n\n" +
+        "Yang akan direset:\n" +
+        "• Transaksi\n" +
+        "• Pengeluaran\n" +
+        "• Keranjang\n\n" +
+        "Data Menu, Kategori, dan User tetap aman.\n\n" +
+        "Lanjutkan?"
+    )) {
+        return;
+    }
+
+    try {
+        // Simpan data master
+        const categories = JSON.parse(
+            JSON.stringify(state.categories || [])
+        );
+
+        const products = JSON.parse(
+            JSON.stringify(state.products || [])
+        );
+
+        const users = JSON.parse(
+            JSON.stringify(state.users || [])
+        );
+
+        // Reset hanya data operasional
+        state.transactions = [];
+        state.expenses = [];
+        state.cart = [];
+
+        // Pertahankan data master
+        state.categories = categories;
+        state.products = products;
+        state.users = users;
+
+        // Pertahankan pengaturan toko
+        state.lastActiveDate = getTodayDateString();
+
+        // Simpan ke Supabase
+        await saveStateToSupabase();
+
+        alert(
+            "Reset berhasil!\n\n" +
+            "Menu, Kategori, dan User tetap tersimpan."
+        );
+
+        render();
+
+    } catch (error) {
+        console.error("Gagal melakukan reset:", error);
+
+        alert(
+            "Gagal melakukan reset data:\n" +
+            (error.message || error)
+        );
+    }
+                }
 
         function formatRupiah(num) {
             if (num === '' || num === null || isNaN(num)) return 'Rp 0';
