@@ -22,7 +22,7 @@ jobs:
       - name: Tambahkan Android
         run: npx cap add android
 
-      - name: Siapkan ikon aplikasi
+      - name: Buat Adaptive Icon Bakso Master
         run: |
           sudo apt-get update
           sudo apt-get install -y imagemagick
@@ -32,6 +32,8 @@ jobs:
           mkdir -p android/app/src/main/res/mipmap-xhdpi
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/drawable
 
           convert icon.png -resize 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           convert icon.png -resize 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -39,7 +41,58 @@ jobs:
           convert icon.png -resize 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           convert icon.png -resize 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
-          echo "Ikon aplikasi berhasil dibuat."
+          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+
+          convert icon.png -resize 108x108 android/app/src/main/res/drawable/ic_launcher_foreground.png
+
+          mkdir -p android/app/src/main/res/values
+
+          cat > android/app/src/main/res/values/icon_colors.xml <<'EOF'
+          <resources>
+              <color name="icon_background">#000000</color>
+          </resources>
+          EOF
+
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/icon_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/icon_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          echo "Adaptive icon berhasil dibuat."
+
+      - name: Gunakan ikon Bakso Master
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+          text = manifest.read_text()
+
+          text = text.replace(
+              '@mipmap/ic_launcher',
+              '@mipmap/ic_launcher'
+          )
+
+          manifest.write_text(text)
+          PY
 
       - name: Buat folder plugin native
         run: mkdir -p android/app/src/main/java/com/baksomaster/pos
