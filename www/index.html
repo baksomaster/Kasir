@@ -649,8 +649,247 @@
 
             return new Uint8Array(bytes);
         }
+        async function printDirectBluetoothNative(trxData) {
+    const t = trxData || state.selectedReceiptTrx;
+
+    if (!t) {
+        alert('Data transaksi tidak ditemukan!');
+        return;
+    }
+
+    try {
+        // Memastikan Capacitor tersedia
+        if (
+            typeof window.Capacitor === 'undefined' ||
+            typeof window.Capacitor.Plugins === 'undefined'
+        ) {
+            throw new Error('Capacitor tidak tersedia.');
+        }
+
+        const BluetoothPrinter =
+            window.Capacitor.Plugins.BluetoothPrinter;
+
+        if (!BluetoothPrinter) {
+            throw new Error(
+                'BluetoothPrinter Plugin tidak ditemukan di APK.'
+            );
+        }
+
+        showToast('Meminta izin Bluetooth...');
+
+        const permission =
+            await BluetoothPrinter.requestPermission();
+
+        if (
+            !permission ||
+            permission.granted !== true
+        ) {
+            alert(
+                'Izin Bluetooth diperlukan untuk mencetak.'
+            );
+            return;
+        }
+
+        showToast('Mencari printer Bluetooth...');
+
+        const result =
+            await BluetoothPrinter.getPairedPrinters();
+
+        const devices =
+            result && Array.isArray(result.devices)
+                ? result.devices
+                : [];
+
+        if (devices.length === 0) {
+            alert(
+                'Tidak ada printer Bluetooth yang sudah dipasangkan.\n\n' +
+                'Silakan pasangkan Xprinter/RPP02N melalui Pengaturan Bluetooth HP terlebih dahulu.'
+            );
+            return;
+        }
+
+        // Tampilkan daftar printer yang sudah paired
+        let message =
+            'Pilih printer Bluetooth:\n\n';
+
+        devices.forEach((device, index) => {
+            message +=
+                `${index + 1}. ${device.name || 'Printer'}\n` +
+                `   ${device.address || ''}\n\n`;
+        });
+
+        const choice =
+            prompt(
+                message +
+                'Masukkan nomor printer:'
+            );
+
+        if (choice === null) {
+            return;
+        }
+
+        const index =
+            parseInt(choice, 10) - 1;
+
+        if (
+            isNaN(index) ||
+            index < 0 ||
+            index >= devices.length
+        ) {
+            alert('Pilihan printer tidak valid.');
+            return;
+        }
+
+        const selectedPrinter =
+            devices[index];
+
+        showToast(
+            'Menghubungkan ke ' +
+            (selectedPrinter.name || 'printer') +
+            '...'
+        );
+
+        const connection =
+            await BluetoothPrinter.connect({
+                address:
+                    selectedPrinter.address
+            });
+
+        if (
+            !connection ||
+            connection.connected !== true
+        ) {
+            alert(
+                'Gagal terhubung ke printer.'
+            );
+            return;
+        }
+
+        showToast(
+            'Menyiapkan struk...'
+        );
+
+        // Logo
+        const logoUrl =
+            'Bakso Master_20260806_015624_0000.png';
+
+        let logoBytes =
+            new Uint8Array(0);
+
+        try {
+            logoBytes =
+                await imageToEscPos(
+                    logoUrl,
+                    200
+                );
+        } catch (imgErr) {
+            console.warn(
+                'Logo gagal diproses. Mencetak teks saja.',
+                imgErr
+            );
+        }
+
+        // Isi struk ESC/POS
+        const textBytes =
+            generateEscPosBuffer(t);
+
+        // Gabungkan logo + teks
+        const finalBytes =
+            new Uint8Array(
+                logoBytes.length +
+                textBytes.length
+            );
+
+        finalBytes.set(
+            logoBytes,
+            0
+        );
+
+        finalBytes.set(
+            textBytes,
+            logoBytes.length
+        );
+
+        // Konversi Uint8Array → Base64
+        let binary = '';
+
+        const CHUNK_SIZE = 0x8000;
+
+        for (
+            let i = 0;
+            i < finalBytes.length;
+            i += CHUNK_SIZE
+        ) {
+            binary += String.fromCharCode(
+                ...finalBytes.slice(
+                    i,
+                    i + CHUNK_SIZE
+                )
+            );
+        }
+
+        const base64Data =
+            btoa(binary);
+
+        showToast(
+            'Mengirim data ke printer...'
+        );
+
+        await BluetoothPrinter.print({
+            data: base64Data
+        });
+
+        showToast(
+            'Berhasil mencetak!'
+        );
+
+        // Beri sedikit waktu agar data selesai dikirim
+        await new Promise(
+            resolve =>
+                setTimeout(resolve, 500)
+        );
+
+        await BluetoothPrinter.disconnect();
+
+    } catch (error) {
+
+        console.error(
+            'Bluetooth Native Error:',
+            error
+        );
+
+        alert(
+            'Gagal mencetak via Bluetooth:\n' +
+            (error.message || error)
+        );
+
+        try {
+            const BluetoothPrinter =
+                window.Capacitor?.Plugins
+                    ?.BluetoothPrinter;
+
+            if (BluetoothPrinter) {
+                await BluetoothPrinter.disconnect();
+            }
+        } catch (disconnectError) {
+            console.warn(
+                'Gagal disconnect:',
+                disconnectError
+            );
+        }
+    }
+        }
 
         async function printDirectBluetooth(trxData) {
+                // Jika berjalan sebagai APK Android,
+    // gunakan Bluetooth native Capacitor.
+    if (
+        window.Capacitor &&
+        typeof window.Capacitor.isNativePlatform === 'function' &&
+        window.Capacitor.isNativePlatform()
+    ) {
+        return printDirectBluetoothNative(trxData);
+    }
     const t = trxData || state.selectedReceiptTrx;
     if (!t) {
         alert('Data transaksi tidak ditemukan!');
