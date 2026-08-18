@@ -10,14 +10,14 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. AMBIL KODE DARI REPOSITORY
+      # 1. AMBIL SOURCE CODE
       # ============================================================
       - name: Ambil kode dari repository
         uses: actions/checkout@v4
 
 
       # ============================================================
-      # 2. SIAPKAN NODE.JS
+      # 2. NODE.JS
       # ============================================================
       - name: Siapkan Node.js
         uses: actions/setup-node@v4
@@ -50,14 +50,15 @@ jobs:
       # ============================================================
       # 6. BLUETOOTH PRINTER PLUGIN
       #
-      # Xprinter XP-58IIZ
-      # RPP02N
-      # Bluetooth Classic
-      # ESC/POS
-      # SPP / RFCOMM
+      # Mendukung:
+      # - Xprinter XP-58IIZ
+      # - RPP02N
+      # - Bluetooth Classic
+      # - ESC/POS
+      # - SPP UUID 00001101...
       #
-      # Data dikirim secara bertahap agar lebih stabil ketika
-      # HP juga sedang terhubung ke Bluetooth audio/musik.
+      # Pengiriman dibuat bertahap agar lebih stabil ketika
+      # Bluetooth audio/music juga sedang aktif.
       # ============================================================
       - name: Buat BluetoothPrinterPlugin
         run: |
@@ -100,6 +101,10 @@ jobs:
               private volatile BluetoothSocket socket;
               private volatile OutputStream output;
 
+              /*
+               * Standard Bluetooth Classic SPP UUID.
+               * Digunakan oleh banyak printer thermal POS.
+               */
               private static final UUID SPP_UUID =
                   UUID.fromString(
                       "00001101-0000-1000-8000-00805F9B34FB"
@@ -107,11 +112,19 @@ jobs:
 
               /*
                * Ukuran paket pengiriman.
+               *
+               * Jangan terlalu besar karena printer thermal
+               * Bluetooth lama dapat lebih stabil menerima
+               * data dalam potongan kecil.
                */
               private static final int WRITE_CHUNK_SIZE = 512;
 
               /*
                * Jeda antar paket.
+               *
+               * Sangat membantu untuk printer Bluetooth murah/
+               * thermal ketika HP juga sedang menggunakan
+               * Bluetooth untuk audio.
                */
               private static final int WRITE_DELAY_MS = 8;
 
@@ -137,9 +150,7 @@ jobs:
 
 
               @PluginMethod
-              public void requestPermission(
-                  PluginCall call
-              ) {
+              public void requestPermission(PluginCall call) {
 
                   if (
                       Build.VERSION.SDK_INT >=
@@ -156,8 +167,7 @@ jobs:
                       return;
                   }
 
-                  JSObject result =
-                      new JSObject();
+                  JSObject result = new JSObject();
 
                   result.put(
                       "granted",
@@ -198,7 +208,7 @@ jobs:
 
 
               // ====================================================
-              // DAFTAR BLUETOOTH YANG SUDAH PAIRED
+              // DAFTAR DEVICE YANG SUDAH PAIRED
               // ====================================================
 
               @PluginMethod
@@ -296,7 +306,7 @@ jobs:
 
 
               // ====================================================
-              // CONNECT PRINTER
+              // CONNECT
               // ====================================================
 
               @PluginMethod
@@ -361,18 +371,15 @@ jobs:
                               );
 
                           /*
-                           * Tutup koneksi printer lama.
+                           * Tutup koneksi lama terlebih dahulu.
                            */
                           closeConnection();
 
-                          /*
-                           * Jangan melakukan discovery
-                           * ketika menghubungkan printer.
-                           */
                           adapter.cancelDiscovery();
 
                           /*
-                           * Coba koneksi Secure RFCOMM.
+                           * Koneksi utama:
+                           * Secure RFCOMM / SPP.
                            */
                           try {
 
@@ -386,8 +393,8 @@ jobs:
                           } catch (Exception secureError) {
 
                               /*
-                               * Fallback ke Insecure RFCOMM
-                               * untuk printer thermal tertentu.
+                               * Beberapa printer thermal lama
+                               * membutuhkan insecure RFCOMM.
                                */
                               try {
 
@@ -479,7 +486,7 @@ jobs:
 
 
               // ====================================================
-              // STATUS PRINTER
+              // STATUS
               // ====================================================
 
               @PluginMethod
@@ -490,7 +497,6 @@ jobs:
                   boolean connected =
                       socket != null &&
                       socket.isConnected() &&
-                      !socket.isClosed() &&
                       output != null;
 
                   JSObject result =
@@ -523,7 +529,6 @@ jobs:
                   if (
                       currentSocket == null ||
                       !currentSocket.isConnected() ||
-                      currentSocket.isClosed() ||
                       currentOutput == null
                   ) {
 
@@ -551,9 +556,11 @@ jobs:
 
                   new Thread(() -> {
 
-                      synchronized (
-                          BluetoothPrinterPlugin.this
-                      ) {
+                      /*
+                       * Synchronized mencegah dua perintah
+                       * cetak masuk bersamaan.
+                       */
+                      synchronized (BluetoothPrinterPlugin.this) {
 
                           try {
 
@@ -563,24 +570,14 @@ jobs:
                                       android.util.Base64.DEFAULT
                                   );
 
-                              if (
-                                  bytes == null ||
-                                  bytes.length == 0
-                              ) {
-
-                                  call.reject(
-                                      "Data cetak kosong."
-                                  );
-
-                                  return;
-                              }
-
+                              /*
+                               * Kirim dalam beberapa paket kecil.
+                               *
+                               * Ini tetap mengirim byte ESC/POS
+                               * asli tanpa mengubah isi data.
+                               */
                               int offset = 0;
 
-                              /*
-                               * Kirim ESC/POS dalam potongan
-                               * kecil agar printer lebih stabil.
-                               */
                               while (
                                   offset < bytes.length
                               ) {
@@ -604,6 +601,10 @@ jobs:
 
                                   offset += length;
 
+                                  /*
+                                   * Beri waktu printer memproses
+                                   * buffer sebelum paket berikutnya.
+                                   */
                                   if (
                                       offset < bytes.length
                                   ) {
@@ -632,8 +633,9 @@ jobs:
                               currentOutput.flush();
 
                               /*
-                               * Beri waktu printer menerima
-                               * paket terakhir.
+                               * Beri waktu sedikit agar printer
+                               * menerima data terakhir sebelum
+                               * koneksi ditutup.
                                */
                               try {
 
@@ -653,11 +655,6 @@ jobs:
                               result.put(
                                   "success",
                                   true
-                              );
-
-                              result.put(
-                                  "bytesSent",
-                                  bytes.length
                               );
 
                               call.resolve(result);
@@ -719,11 +716,7 @@ jobs:
 
 
       # ============================================================
-      # 7. DOWNLOAD FILE PLUGIN
-      #
-      # Digunakan untuk:
-      # - Export Excel
-      # - Simpan file langsung ke folder Download
+      # 7. DOWNLOAD FILE / EXCEL
       # ============================================================
       - name: Buat DownloadFilePlugin
         run: |
@@ -747,26 +740,17 @@ jobs:
           import java.io.FileOutputStream;
           import java.io.OutputStream;
 
-          @CapacitorPlugin(
-              name = "DownloadFile"
-          )
-          public class DownloadFilePlugin
-              extends Plugin {
+          @CapacitorPlugin(name = "DownloadFile")
+          public class DownloadFilePlugin extends Plugin {
 
               @PluginMethod
-              public void save(
-                  PluginCall call
-              ) {
+              public void save(PluginCall call) {
 
                   String fileName =
-                      call.getString(
-                          "fileName"
-                      );
+                      call.getString("fileName");
 
                   String data =
-                      call.getString(
-                          "data"
-                      );
+                      call.getString("data");
 
                   String mimeType =
                       call.getString(
@@ -811,8 +795,8 @@ jobs:
                       /*
                        * Android 10+
                        *
-                       * File langsung disimpan ke:
-                       * Download
+                       * Simpan langsung ke:
+                       * Penyimpanan internal / Download
                        */
                       if (
                           Build.VERSION.SDK_INT >=
@@ -898,9 +882,6 @@ jobs:
 
                       } else {
 
-                          /*
-                           * Android versi lama.
-                           */
                           File directory =
                               Environment
                                   .getExternalStoragePublicDirectory(
@@ -908,7 +889,6 @@ jobs:
                                   );
 
                           if (!directory.exists()) {
-
                               directory.mkdirs();
                           }
 
@@ -930,18 +910,11 @@ jobs:
                           }
 
                           uri =
-                              Uri.fromFile(
-                                  file
-                              );
+                              Uri.fromFile(file);
                       }
 
                       JSObject result =
                           new JSObject();
-
-                      result.put(
-                          "success",
-                          true
-                      );
 
                       result.put(
                           "fileName",
@@ -956,6 +929,11 @@ jobs:
                       result.put(
                           "location",
                           "Download"
+                      );
+
+                      result.put(
+                          "success",
+                          true
                       );
 
                       call.resolve(result);
@@ -975,10 +953,6 @@ jobs:
 
       # ============================================================
       # 8. MAIN ACTIVITY
-      #
-      # Mendaftarkan:
-      # - BluetoothPrinterPlugin
-      # - DownloadFilePlugin
       # ============================================================
       - name: Buat MainActivity
         run: |
@@ -989,8 +963,7 @@ jobs:
 
           import com.getcapacitor.BridgeActivity;
 
-          public class MainActivity
-              extends BridgeActivity {
+          public class MainActivity extends BridgeActivity {
 
               @Override
               public void onCreate(
@@ -1014,7 +987,7 @@ jobs:
 
 
       # ============================================================
-      # 9. PERMISSION BLUETOOTH
+      # 9. BLUETOOTH PERMISSION
       # ============================================================
       - name: Tambahkan permission Bluetooth
         run: |
@@ -1034,51 +1007,27 @@ jobs:
               <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
           """
 
-          if (
-              "android.permission.BLUETOOTH_CONNECT"
-              not in text
-          ):
-
+          if "android.permission.BLUETOOTH_CONNECT" not in text:
               text = text.replace(
                   "<application",
-                  permissions +
-                  "\n    <application",
+                  permissions + "\n    <application",
                   1
               )
 
-              manifest.write_text(
-                  text
-              )
+              manifest.write_text(text)
           PY
 
+
       # ============================================================
-      # 10. SIAPKAN ICON BAKSO MASTER
+      # 10. ICON APLIKASI BAKSO MASTER
       #
-      # Sumber logo:
-      # icon.png
+      # Menggunakan:
+      # repository root / icon.png
       #
-      # Background:
-      # HITAM
+      # Tidak menggunakan icon Android bawaan.
       # ============================================================
       - name: Siapkan icon Bakso Master
         run: |
-          echo "Memeriksa file icon.png..."
-
-          if [ ! -f "icon.png" ]; then
-            echo "ERROR: icon.png tidak ditemukan di root repository."
-            echo "Isi root repository:"
-            ls -la
-            exit 1
-          fi
-
-          echo "icon.png ditemukan."
-
-          echo "Install Pillow..."
-          python3 -m pip install --upgrade pip
-          python3 -m pip install Pillow
-
-          echo "Membuat icon Android..."
-
           python3 - <<'PY'
           from pathlib import Path
           from PIL import Image
@@ -1087,44 +1036,25 @@ jobs:
 
           if not source.exists():
               raise SystemExit(
-                  "ERROR: file icon.png tidak ditemukan."
+                  "ERROR: file icon.png tidak ditemukan di root repository."
               )
 
-          # Buka logo asli
           img = Image.open(source).convert("RGBA")
 
-          print(
-              f"Ukuran logo asli: {img.width}x{img.height}"
-          )
+          # Buat kanvas persegi agar logo tidak gepeng
+          size = max(img.width, img.height)
 
-          # Buat kanvas persegi
-          size = max(
-              img.width,
-              img.height
-          )
-
-          # Background HITAM
           canvas = Image.new(
               "RGBA",
               (size, size),
-              (0, 0, 0, 255)
+              (255, 255, 255, 0)
           )
 
-          # Posisi logo di tengah
           x = (size - img.width) // 2
           y = (size - img.height) // 2
 
-          canvas.alpha_composite(
-              img,
-              (x, y)
-          )
+          canvas.alpha_composite(img, (x, y))
 
-          # Folder resource Android
-          base = Path(
-              "android/app/src/main/res"
-          )
-
-          # Ukuran icon Android
           sizes = {
               "mipmap-mdpi": 48,
               "mipmap-hdpi": 72,
@@ -1133,10 +1063,13 @@ jobs:
               "mipmap-xxxhdpi": 192
           }
 
+          base = Path(
+              "android/app/src/main/res"
+          )
+
           for folder, px in sizes.items():
 
               directory = base / folder
-
               directory.mkdir(
                   parents=True,
                   exist_ok=True
@@ -1157,11 +1090,8 @@ jobs:
                   "PNG"
               )
 
-              print(
-                  f"Berhasil membuat {folder}: {px}x{px}"
-              )
-
           # Hapus adaptive icon bawaan Capacitor/Android
+          # agar Android tidak kembali memakai icon Android default.
           adaptive_dirs = [
               base / "mipmap-anydpi-v26",
               base / "mipmap-anydpi"
@@ -1181,25 +1111,7 @@ jobs:
                       if target.exists():
                           target.unlink()
 
-          print(
-              "========================================"
-          )
-
-          print(
-              "ICON BAKSO MASTER BERHASIL DIBUAT"
-          )
-
-          print(
-              "Background: HITAM"
-          )
-
-          print(
-              "Logo: icon.png asli"
-          )
-
-          print(
-              "========================================"
-          )
+          print("Icon Bakso Master berhasil dipasang.")
           PY
 
 
@@ -1207,12 +1119,11 @@ jobs:
       # 11. SINKRONISASI CAPACITOR
       # ============================================================
       - name: Sinkronisasi Capacitor
-        run: |
-          npx cap sync android
+        run: npx cap sync android
 
 
       # ============================================================
-      # 12. JAVA 21
+      # 12. SET JAVA
       # ============================================================
       - name: Siapkan Java
         uses: actions/setup-java@v4
@@ -1232,7 +1143,7 @@ jobs:
 
 
       # ============================================================
-      # 14. UPLOAD APK
+      # 14. SIMPAN APK SEBAGAI ARTIFACT
       # ============================================================
       - name: Simpan APK
         uses: actions/upload-artifact@v4
