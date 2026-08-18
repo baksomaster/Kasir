@@ -122,389 +122,666 @@ jobs:
           import java.util.UUID;
 
           @CapacitorPlugin(
-              name = "BluetoothPrinter",
-              permissions = {
-                  @Permission(
-                      alias = "bluetooth",
-                      strings = {
-                          Manifest.permission.BLUETOOTH_CONNECT,
-                          Manifest.permission.BLUETOOTH_SCAN
-                      }
-                  )
-              }
-          )
-          public class BluetoothPrinterPlugin extends Plugin {
+          name = "BluetoothPrinter",
+          permissions = {
+          @Permission(
+            alias = "bluetooth",
+            strings = {
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN
+            }
+            )
+            }
+            )
+            public class BluetoothPrinterPlugin extends Plugin {
+            
+            private BluetoothSocket socket;
+            private OutputStream output;
+            
+            /*
+            * Standard Bluetooth Serial Port Profile UUID.
+            * Digunakan oleh banyak printer thermal Bluetooth
+            * seperti Xprinter XP-58IIZ / RPP02N.
+            */
+            private static final UUID SPP_UUID =
+            UUID.fromString(
+            "00001101-0000-1000-8000-00805F9B34FB"
+            );
+            
+            /*
+            * Ukuran paket pengiriman.
+            *
+            * Sengaja tidak mengirim seluruh struk sekaligus.
+            * Ini membantu ketika HP juga sedang menggunakan
+            * Bluetooth untuk audio/musik.
+            */
+            private static final int WRITE_CHUNK_SIZE = 256;
+            /*
+            * Jeda antar paket.
+            *
+            * Nilai 15 ms cukup kecil agar pencetakan tetap cepat,
+            * tetapi memberikan waktu kepada stack Bluetooth
+            * dan printer untuk memproses data.
+            */
+            private static final int WRITE_DELAY_MS = 15;
+            
+            /*
+            * Jeda tambahan setelah flush.
+            */
+            private static final int FLUSH_DELAY_MS = 20;
+            
+            /*
+            * Lock khusus untuk proses print.
+            *
+            * Mencegah dua proses print berjalan bersamaan
+            */
+            private final Object printLock = new Object();
+            
+            private boolean hasBluetoothPermission() {
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+            return getContext().checkSelfPermission(
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED;
+            
+            }
+             return true;
+             }
+             
+             @PluginMethod
+             public void requestPermission(PluginCall call) {
+             if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !hasBluetoothPermission()
+            ) {
+
+            requestPermissionForAlias(
+                "bluetooth",
+                call,
+                "permissionCallback"
+            );
+
+            return;
+            }
+            JSObject result = new JSObject();
+            
+            result.put(
+            "granted",
+            true
+            );
+            
+             call.resolve(result);
+             
+             }
+             
+             @PermissionCallback
+             private void permissionCallback(PluginCall call) {
+             
+             boolean granted =
+              hasBluetoothPermission();
+              
+              JSObject result =
+            new JSObject();
+            result.put(
+            "granted",
+            granted
+            );
+            
+            if (granted) {
 
-              private BluetoothSocket socket;
-              private OutputStream output;
+            call.resolve(result);
+            
+            } else {
 
-              private static final UUID SPP_UUID =
-                  UUID.fromString(
-                      "00001101-0000-1000-8000-00805F9B34FB"
-                  );
+            call.reject(
+                "Izin Bluetooth ditolak."
+            );
+            }
+            
+            }
+            @PluginMethod
+            public void getPairedPrinters(
+            PluginCall call
+            ) {
 
-              private boolean hasBluetoothPermission() {
+            if (!hasBluetoothPermission()) {
 
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            call.reject(
+                "Izin Bluetooth belum diberikan."
+            );
 
-                      return getContext().checkSelfPermission(
-                          Manifest.permission.BLUETOOTH_CONNECT
-                      ) == PackageManager.PERMISSION_GRANTED;
-                  }
+            return;
+            }
 
-                  return true;
-              }
+            try {
 
-              @PluginMethod
-              public void requestPermission(PluginCall call) {
+            BluetoothAdapter adapter =
+                BluetoothAdapter.getDefaultAdapter();
 
-                  if (
-                      Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                      !hasBluetoothPermission()
-                  ) {
+            if (adapter == null) {
 
-                      requestPermissionForAlias(
-                          "bluetooth",
-                          call,
-                          "permissionCallback"
-                      );
+                call.reject(
+                    "HP tidak mendukung Bluetooth."
+                );
 
-                      return;
-                  }
+                return;
+            }
 
-                  JSObject result = new JSObject();
-                  result.put("granted", true);
+            if (!adapter.isEnabled()) {
 
-                  call.resolve(result);
-              }
+                call.reject(
+                    "Bluetooth HP belum dinyalakan."
+                );
 
-              @PermissionCallback
-              private void permissionCallback(PluginCall call) {
+                return;
+            }
 
-                  boolean granted =
-                      hasBluetoothPermission();
+            JSArray devices =
+                new JSArray();
 
-                  JSObject result = new JSObject();
+            for (
+                BluetoothDevice device :
+                adapter.getBondedDevices()
+            ) {
 
-                  result.put(
-                      "granted",
-                      granted
-                  );
+                JSObject item =
+                    new JSObject();
 
-                  if (granted) {
+                String deviceName;
 
-                      call.resolve(result);
+                try {
 
-                  } else {
+                    deviceName =
+                        device.getName();
 
-                      call.reject(
-                          "Izin Bluetooth ditolak."
-                      );
-                  }
-              }
+                } catch (Exception e) {
 
-              @PluginMethod
-              public void getPairedPrinters(PluginCall call) {
+                    deviceName =
+                        "Bluetooth Printer";
+                }
 
-                  if (!hasBluetoothPermission()) {
+                if (
+                    deviceName == null ||
+                    deviceName.trim().isEmpty()
+                ) {
 
-                      call.reject(
-                          "Izin Bluetooth belum diberikan."
-                      );
+                    deviceName =
+                        "Bluetooth Printer";
+                }
 
-                      return;
-                  }
+                item.put(
+                    "name",
+                    deviceName
+                );
 
-                  try {
+                item.put(
+                    "address",
+                    device.getAddress()
+                );
 
-                      BluetoothAdapter adapter =
-                          BluetoothAdapter.getDefaultAdapter();
+                devices.put(item);
+            }
 
-                      if (adapter == null) {
+            JSObject result =
+                new JSObject();
 
-                          call.reject(
-                              "HP tidak mendukung Bluetooth."
-                          );
+            result.put(
+                "devices",
+                devices
+            );
 
-                          return;
-                      }
+            call.resolve(result);
 
-                      if (!adapter.isEnabled()) {
+          } catch (Exception e) {
 
-                          call.reject(
-                              "Bluetooth HP belum dinyalakan."
-                          );
+            call.reject(
+                "Gagal membaca printer: " +
+                e.getMessage(),
+                e
+            );
+           }
+           }
+           
+           @PluginMethod
+           public void connect(
+           PluginCall call
+           ) {
 
-                          return;
-                      }
+           if (!hasBluetoothPermission()) {
 
-                      JSArray devices =
-                          new JSArray();
+            call.reject(
+                "Izin Bluetooth belum diberikan."
+            );
 
-                      for (
-                          BluetoothDevice device :
-                          adapter.getBondedDevices()
-                      ) {
+            return;
+           }
 
-                          JSObject item =
-                              new JSObject();
+           String address =
+            call.getString("address");
 
-                          item.put(
-                              "name",
-                              device.getName() != null
-                                  ? device.getName()
-                                  : "Bluetooth Printer"
-                          );
+           if (
+            address == null ||
+            address.trim().isEmpty()
+          ) {
 
-                          item.put(
-                              "address",
-                              device.getAddress()
-                          );
+            call.reject(
+                "Alamat printer tidak ditemukan."
+            );
 
-                          devices.put(item);
-                      }
-
-                      JSObject result =
-                          new JSObject();
-
-                      result.put(
-                          "devices",
-                          devices
-                      );
-
-                      call.resolve(result);
-
-                  } catch (Exception e) {
-
-                      call.reject(
-                          "Gagal membaca printer: " +
-                          e.getMessage(),
-                          e
-                      );
-                  }
-              }
-
-              @PluginMethod
-              public void connect(PluginCall call) {
-
-                  if (!hasBluetoothPermission()) {
-
-                      call.reject(
-                          "Izin Bluetooth belum diberikan."
-                      );
-
-                      return;
-                  }
-
-                  String address =
-                      call.getString("address");
-
-                  if (
-                      address == null ||
-                      address.trim().isEmpty()
-                  ) {
-
-                      call.reject(
-                          "Alamat printer tidak ditemukan."
-                      );
-
-                      return;
-                  }
-
-                  new Thread(() -> {
-
-                      try {
-
-                          BluetoothAdapter adapter =
-                              BluetoothAdapter.getDefaultAdapter();
-
-                          if (adapter == null) {
-
-                              call.reject(
-                                  "HP tidak mendukung Bluetooth."
-                              );
-
-                              return;
-                          }
-
-                          BluetoothDevice device =
-                              adapter.getRemoteDevice(
-                                  address
-                              );
-
-                          if (socket != null) {
-
-                              try {
-
-                                  socket.close();
-
-                              } catch (Exception ignored) {}
-                          }
-
-                          adapter.cancelDiscovery();
-
-                          socket =
-                              device.createRfcommSocketToServiceRecord(
-                                  SPP_UUID
-                              );
-
-                          socket.connect();
-
-                          output =
-                              socket.getOutputStream();
-
-                          JSObject result =
-                              new JSObject();
-
-                          result.put(
-                              "connected",
-                              true
-                          );
-
-                          result.put(
-                              "name",
-                              device.getName()
-                          );
-
-                          result.put(
-                              "address",
-                              device.getAddress()
-                          );
-
-                          call.resolve(result);
-
-                      } catch (Exception e) {
-
-                          try {
-
-                              if (socket != null) {
-                                  socket.close();
-                              }
-
-                          } catch (Exception ignored) {}
-
-                          socket = null;
-                          output = null;
-
-                          call.reject(
-                              "Gagal terhubung ke printer: " +
-                              e.getMessage(),
-                              e
-                          );
-                      }
-
-                  }).start();
-              }
-
-              @PluginMethod
-              public void disconnect(PluginCall call) {
-
-                  try {
-
-                      if (socket != null) {
-                          socket.close();
-                      }
-
-                  } catch (Exception ignored) {}
-
-                  socket = null;
-                  output = null;
-
-                  JSObject result =
-                      new JSObject();
-
-                  result.put(
-                      "connected",
-                      false
-                  );
-
-                  call.resolve(result);
-              }
-
-              @PluginMethod
-              public void getStatus(PluginCall call) {
-
-                  JSObject result =
-                      new JSObject();
-
-                  result.put(
-                      "connected",
-                      socket != null &&
-                      socket.isConnected()
-                  );
-
-                  call.resolve(result);
-              }
-
-              @PluginMethod
-              public void print(PluginCall call) {
-
-                  if (
-                      socket == null ||
-                      !socket.isConnected() ||
-                      output == null
-                  ) {
-
-                      call.reject(
-                          "Printer belum terhubung."
-                      );
-
-                      return;
-                  }
-
-                  String data =
-                      call.getString("data");
-
-                  if (
-                      data == null ||
-                      data.isEmpty()
-                  ) {
-
-                      call.reject(
-                          "Data cetak kosong."
-                      );
-
-                      return;
-                  }
-
-                  new Thread(() -> {
-
-                      try {
-
-                          byte[] bytes =
-                              android.util.Base64.decode(
-                                  data,
-                                  android.util.Base64.DEFAULT
-                              );
-
-                          output.write(bytes);
-                          output.flush();
-
-                          JSObject result =
-                              new JSObject();
-
-                          result.put(
-                              "success",
-                              true
-                          );
-
-                          call.resolve(result);
-
-                      } catch (Exception e) {
-
-                          call.reject(
-                              "Gagal mencetak: " +
-                              e.getMessage(),
-                              e
-                          );
-                      }
-
-                  }).start();
-              }
+            return;
           }
-          EOF
+
+          new Thread(() -> {
+
+            BluetoothSocket newSocket = null;
+
+            try {
+
+                BluetoothAdapter adapter =
+                    BluetoothAdapter.getDefaultAdapter();
+
+                if (adapter == null) {
+
+                    call.reject(
+                        "HP tidak mendukung Bluetooth."
+                    );
+
+                    return;
+                }
+
+                if (!adapter.isEnabled()) {
+
+                    call.reject(
+                        "Bluetooth HP belum dinyalakan."
+                    );
+
+                    return;
+                }
+
+                BluetoothDevice device =
+                    adapter.getRemoteDevice(address);
+
+                /*
+                 * Jangan melakukan discovery ketika
+                 * akan membuat koneksi printer.
+                 *
+                 * Discovery dapat mengganggu koneksi
+                 * Bluetooth lainnya.
+                 */
+                adapter.cancelDiscovery();
+
+                /*
+                 * Tutup koneksi printer lama jika ada.
+                 */
+                synchronized (printLock) {
+
+                    if (socket != null) {
+
+                        try {
+                            socket.close();
+                        } catch (Exception ignored) {
+                        }
+                    }
+
+                    socket = null;
+                    output = null;
+                }
+
+                /*
+                 * Buat koneksi SPP.
+                 */
+                newSocket =
+                    device.createRfcommSocketToServiceRecord(
+                        SPP_UUID
+                    );
+
+                /*
+                 * Connect dilakukan di background thread
+                 * agar UI tidak macet.
+                 */
+                newSocket.connect();
+
+                OutputStream newOutput =
+                    newSocket.getOutputStream();
+
+                synchronized (printLock) {
+
+                    socket =
+                        newSocket;
+
+                    output =
+                        newOutput;
+                }
+
+                JSObject result =
+                    new JSObject();
+
+                result.put(
+                    "connected",
+                    true
+                );
+
+                String deviceName;
+
+                try {
+
+                    deviceName =
+                        device.getName();
+
+                } catch (Exception e) {
+
+                    deviceName =
+                        "Bluetooth Printer";
+                }
+
+                result.put(
+                    "name",
+                    deviceName
+                );
+
+                result.put(
+                    "address",
+                    device.getAddress()
+                );
+
+                call.resolve(result);
+
+            } catch (Exception e) {
+
+                if (newSocket != null) {
+
+                    try {
+                        newSocket.close();
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                synchronized (printLock) {
+
+                    socket = null;
+                    output = null;
+                }
+
+                call.reject(
+                    "Gagal terhubung ke printer: " +
+                    e.getMessage(),
+                    e
+                );
+            }
+
+          }).start();
+          }
+          
+          @PluginMethod
+          public void disconnect(
+          PluginCall call
+          ) {
+
+           synchronized (printLock) {
+
+            try {
+
+                if (output != null) {
+                    output.flush();
+                }
+
+            } catch (Exception ignored) {
+            }
+
+            try {
+
+                if (socket != null) {
+                    socket.close();
+                }
+
+            } catch (Exception ignored) {
+            }
+
+            socket = null;
+            output = null;
+            }
+
+            JSObject result =
+            new JSObject();
+
+            result.put(
+            "connected",
+            false
+            );
+
+           call.resolve(result);
+           }
+           
+           @PluginMethod
+          public void getStatus(
+          PluginCall call
+          ) {
+
+          boolean connected = false;
+
+          synchronized (printLock) {
+
+            try {
+
+                connected =
+                    socket != null &&
+                    socket.isConnected() &&
+                    !socket.isClosed();
+
+            } catch (Exception ignored) {
+
+                connected = false;
+            }
+           }
+
+          JSObject result =
+            new JSObject();
+
+          result.put(
+            "connected",
+            connected
+          );
+
+          call.resolve(result);
+          }
+              /*
+          * Mengirim data printer secara bertahap.
+          *
+          * Ini bagian utama dari perbaikan.
+          */
+          private void writeInChunks(
+          OutputStream stream,
+          byte[] bytes
+          ) throws Exception {
 
 
+
+          int offset = 0;
+
+          while (offset < bytes.length) {
+
+            int remaining =
+                bytes.length - offset;
+
+            int chunkSize =
+                Math.min(
+                    WRITE_CHUNK_SIZE,
+                    remaining
+                );
+
+            stream.write(
+                bytes,
+                offset,
+                chunkSize
+            );
+
+            stream.flush();
+
+            offset += chunkSize;
+
+            /*
+             * Beri waktu stack Bluetooth dan
+             * printer memproses paket.
+             */
+            if (offset < bytes.length) {
+
+                Thread.sleep(
+                    WRITE_DELAY_MS
+                );
+            }
+          }
+
+          /*
+          * Flush terakhir.
+          */
+          stream.flush();
+
+          Thread.sleep(
+            FLUSH_DELAY_MS
+          );
+          }
+
+          @PluginMethod
+          public void print(
+          PluginCall call
+          ) {
+
+          String data =
+            call.getString("data");
+
+          if (
+            data == null ||
+            data.isEmpty()
+          ) {
+
+            call.reject(
+                "Data cetak kosong."
+            );
+
+            return;
+          }
+
+          /*
+          * Decode Base64 terlebih dahulu sebelum
+          * masuk ke lock.
+          */
+          final byte[] bytes;
+
+          try {
+
+            bytes =
+                android.util.Base64.decode(
+                    data,
+                    android.util.Base64.DEFAULT
+                );
+
+          } catch (Exception e) {
+
+            call.reject(
+                "Data cetak tidak valid: " +
+                e.getMessage(),
+                e
+            );
+
+            return;
+          }
+
+          if (bytes.length == 0) {
+
+            call.reject(
+                "Data cetak kosong."
+            );
+
+            return;
+          }
+
+          /*
+          * Proses print dijalankan dalam thread terpisah.
+          */
+          new Thread(() -> {
+
+            synchronized (printLock) {
+
+                try {
+
+                    /*
+                     * Pastikan printer masih terhubung.
+                     */
+                    if (
+                        socket == null ||
+                        !socket.isConnected() ||
+                        socket.isClosed() ||
+                        output == null
+                    ) {
+
+                        call.reject(
+                            "Printer belum terhubung."
+                        );
+
+                        return;
+                    }
+
+                    /*
+                     * Simpan referensi output agar
+                     * tetap konsisten selama proses print.
+                     */
+                    OutputStream currentOutput =
+                        output;
+
+                    /*
+                     * Kirim data secara bertahap.
+                     */
+                    writeInChunks(
+                        currentOutput,
+                        bytes
+                    );
+
+                    JSObject result =
+                        new JSObject();
+
+                    result.put(
+                        "success",
+                        true
+                    );
+
+                    result.put(
+                        "bytesSent",
+                        bytes.length
+                    );
+
+                    call.resolve(result);
+
+                } catch (Exception e) {
+
+                    /*
+                     * Jika koneksi bermasalah ketika
+                     * mencetak, bersihkan koneksi printer.
+                     */
+                    try {
+
+                        if (socket != null) {
+                            socket.close();
+                        }
+
+                    } catch (Exception ignored) {
+                    }
+
+                    socket = null;
+                    output = null;
+
+                    call.reject(
+                        "Gagal mencetak: " +
+                        e.getMessage(),
+                        e
+                    );
+                }
+            }
+
+           }).start();
+            }
+           }
+                                  
       # ============================================================
       # 10. BUAT DOWNLOAD FILE PLUGIN
       #
@@ -514,7 +791,6 @@ jobs:
       #
       # bukan hanya membuka menu Share.
       # ============================================================
-
       - name: Buat DownloadFilePlugin
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
