@@ -12,7 +12,6 @@ jobs:
       # ============================================================
       # 1. AMBIL KODE DARI REPOSITORY
       # ============================================================
-
       - name: Ambil kode dari repository
         uses: actions/checkout@v4
 
@@ -20,7 +19,6 @@ jobs:
       # ============================================================
       # 2. SIAPKAN NODE.JS
       # ============================================================
-
       - name: Siapkan Node.js
         uses: actions/setup-node@v4
         with:
@@ -30,73 +28,37 @@ jobs:
       # ============================================================
       # 3. INSTALL DEPENDENCIES
       # ============================================================
-
       - name: Install dependencies
         run: npm install
 
 
       # ============================================================
-      # 4. INSTALL CAPACITOR ASSETS
+      # 4. TAMBAHKAN ANDROID
       # ============================================================
-
-      - name: Install Capacitor Assets
-        run: npm install @capacitor/assets --save-dev
-
-
-      # ============================================================
-      # 5. SIAPKAN LOGO BAKSO MASTER
-      #
-      # Repository Anda memiliki:
-      #
-      # icon.png
-      #
-      # File tersebut akan digunakan sebagai icon aplikasi.
-      # ============================================================
-
-      - name: Siapkan icon Bakso Master
-        run: |
-          mkdir -p assets
-          cp icon.png assets/icon.png
-
-
-      # ============================================================
-      # 6. TAMBAHKAN ANDROID
-      # ============================================================
-
       - name: Tambahkan Android
         run: npx cap add android
 
 
       # ============================================================
-      # 7. GENERATE ICON ANDROID
-      #
-      # Menggunakan:
-      # assets/icon.png
-      #
-      # sehingga icon Android berasal dari logo Bakso Master.
+      # 5. BUAT FOLDER PLUGIN NATIVE
       # ============================================================
-
-      - name: Generate icon Android Bakso Master
-        run: |
-          npx @capacitor/assets generate \
-            --android \
-            --iconBackgroundColor "#FFFFFF" \
-            --iconBackgroundColorDark "#FFFFFF"
-
-
-      # ============================================================
-      # 8. BUAT FOLDER PLUGIN NATIVE
-      # ============================================================
-
       - name: Buat folder plugin native
         run: |
           mkdir -p android/app/src/main/java/com/baksomaster/pos
 
 
       # ============================================================
-      # 9. BUAT BLUETOOTH PRINTER PLUGIN
+      # 6. BLUETOOTH PRINTER PLUGIN
+      #
+      # Xprinter XP-58IIZ
+      # RPP02N
+      # Bluetooth Classic
+      # ESC/POS
+      # SPP / RFCOMM
+      #
+      # Data dikirim secara bertahap agar lebih stabil ketika
+      # HP juga sedang terhubung ke Bluetooth audio/musik.
       # ============================================================
-
       - name: Buat BluetoothPrinterPlugin
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/BluetoothPrinterPlugin.java <<'EOF'
@@ -135,17 +97,35 @@ jobs:
           )
           public class BluetoothPrinterPlugin extends Plugin {
 
-              private BluetoothSocket socket;
-              private OutputStream output;
+              private volatile BluetoothSocket socket;
+              private volatile OutputStream output;
 
               private static final UUID SPP_UUID =
                   UUID.fromString(
                       "00001101-0000-1000-8000-00805F9B34FB"
                   );
 
+              /*
+               * Ukuran paket pengiriman.
+               */
+              private static final int WRITE_CHUNK_SIZE = 512;
+
+              /*
+               * Jeda antar paket.
+               */
+              private static final int WRITE_DELAY_MS = 8;
+
+
+              // ====================================================
+              // BLUETOOTH PERMISSION
+              // ====================================================
+
               private boolean hasBluetoothPermission() {
 
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  if (
+                      Build.VERSION.SDK_INT >=
+                      Build.VERSION_CODES.S
+                  ) {
 
                       return getContext().checkSelfPermission(
                           Manifest.permission.BLUETOOTH_CONNECT
@@ -155,11 +135,15 @@ jobs:
                   return true;
               }
 
+
               @PluginMethod
-              public void requestPermission(PluginCall call) {
+              public void requestPermission(
+                  PluginCall call
+              ) {
 
                   if (
-                      Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                      Build.VERSION.SDK_INT >=
+                      Build.VERSION_CODES.S &&
                       !hasBluetoothPermission()
                   ) {
 
@@ -172,19 +156,28 @@ jobs:
                       return;
                   }
 
-                  JSObject result = new JSObject();
-                  result.put("granted", true);
+                  JSObject result =
+                      new JSObject();
+
+                  result.put(
+                      "granted",
+                      true
+                  );
 
                   call.resolve(result);
               }
 
+
               @PermissionCallback
-              private void permissionCallback(PluginCall call) {
+              private void permissionCallback(
+                  PluginCall call
+              ) {
 
                   boolean granted =
                       hasBluetoothPermission();
 
-                  JSObject result = new JSObject();
+                  JSObject result =
+                      new JSObject();
 
                   result.put(
                       "granted",
@@ -203,8 +196,15 @@ jobs:
                   }
               }
 
+
+              // ====================================================
+              // DAFTAR BLUETOOTH YANG SUDAH PAIRED
+              // ====================================================
+
               @PluginMethod
-              public void getPairedPrinters(PluginCall call) {
+              public void getPairedPrinters(
+                  PluginCall call
+              ) {
 
                   if (!hasBluetoothPermission()) {
 
@@ -249,11 +249,21 @@ jobs:
                           JSObject item =
                               new JSObject();
 
+                          String name =
+                              device.getName();
+
+                          if (
+                              name == null ||
+                              name.trim().isEmpty()
+                          ) {
+
+                              name =
+                                  "Bluetooth Device";
+                          }
+
                           item.put(
                               "name",
-                              device.getName() != null
-                                  ? device.getName()
-                                  : "Bluetooth Printer"
+                              name
                           );
 
                           item.put(
@@ -277,15 +287,22 @@ jobs:
                   } catch (Exception e) {
 
                       call.reject(
-                          "Gagal membaca printer: " +
+                          "Gagal membaca perangkat Bluetooth: " +
                           e.getMessage(),
                           e
                       );
                   }
               }
 
+
+              // ====================================================
+              // CONNECT PRINTER
+              // ====================================================
+
               @PluginMethod
-              public void connect(PluginCall call) {
+              public void connect(
+                  PluginCall call
+              ) {
 
                   if (!hasBluetoothPermission()) {
 
@@ -313,6 +330,8 @@ jobs:
 
                   new Thread(() -> {
 
+                      BluetoothSocket newSocket = null;
+
                       try {
 
                           BluetoothAdapter adapter =
@@ -321,7 +340,16 @@ jobs:
                           if (adapter == null) {
 
                               call.reject(
-                                  "HP tidak mendukung Bluetooth."
+                                  "Bluetooth tidak tersedia."
+                              );
+
+                              return;
+                          }
+
+                          if (!adapter.isEnabled()) {
+
+                              call.reject(
+                                  "Bluetooth belum dinyalakan."
                               );
 
                               return;
@@ -332,23 +360,53 @@ jobs:
                                   address
                               );
 
-                          if (socket != null) {
+                          /*
+                           * Tutup koneksi printer lama.
+                           */
+                          closeConnection();
 
-                              try {
-
-                                  socket.close();
-
-                              } catch (Exception ignored) {}
-                          }
-
+                          /*
+                           * Jangan melakukan discovery
+                           * ketika menghubungkan printer.
+                           */
                           adapter.cancelDiscovery();
 
-                          socket =
-                              device.createRfcommSocketToServiceRecord(
-                                  SPP_UUID
-                              );
+                          /*
+                           * Coba koneksi Secure RFCOMM.
+                           */
+                          try {
 
-                          socket.connect();
+                              newSocket =
+                                  device.createRfcommSocketToServiceRecord(
+                                      SPP_UUID
+                                  );
+
+                              newSocket.connect();
+
+                          } catch (Exception secureError) {
+
+                              /*
+                               * Fallback ke Insecure RFCOMM
+                               * untuk printer thermal tertentu.
+                               */
+                              try {
+
+                                  if (newSocket != null) {
+                                      newSocket.close();
+                                  }
+
+                              } catch (Exception ignored) {}
+
+                              newSocket =
+                                  device.createInsecureRfcommSocketToServiceRecord(
+                                      SPP_UUID
+                                  );
+
+                              newSocket.connect();
+                          }
+
+                          socket =
+                              newSocket;
 
                           output =
                               socket.getOutputStream();
@@ -377,8 +435,8 @@ jobs:
 
                           try {
 
-                              if (socket != null) {
-                                  socket.close();
+                              if (newSocket != null) {
+                                  newSocket.close();
                               }
 
                           } catch (Exception ignored) {}
@@ -396,19 +454,17 @@ jobs:
                   }).start();
               }
 
+
+              // ====================================================
+              // DISCONNECT
+              // ====================================================
+
               @PluginMethod
-              public void disconnect(PluginCall call) {
+              public void disconnect(
+                  PluginCall call
+              ) {
 
-                  try {
-
-                      if (socket != null) {
-                          socket.close();
-                      }
-
-                  } catch (Exception ignored) {}
-
-                  socket = null;
-                  output = null;
+                  closeConnection();
 
                   JSObject result =
                       new JSObject();
@@ -421,28 +477,54 @@ jobs:
                   call.resolve(result);
               }
 
+
+              // ====================================================
+              // STATUS PRINTER
+              // ====================================================
+
               @PluginMethod
-              public void getStatus(PluginCall call) {
+              public void getStatus(
+                  PluginCall call
+              ) {
+
+                  boolean connected =
+                      socket != null &&
+                      socket.isConnected() &&
+                      !socket.isClosed() &&
+                      output != null;
 
                   JSObject result =
                       new JSObject();
 
                   result.put(
                       "connected",
-                      socket != null &&
-                      socket.isConnected()
+                      connected
                   );
 
                   call.resolve(result);
               }
 
+
+              // ====================================================
+              // PRINT ESC/POS
+              // ====================================================
+
               @PluginMethod
-              public void print(PluginCall call) {
+              public void print(
+                  PluginCall call
+              ) {
+
+                  final BluetoothSocket currentSocket =
+                      socket;
+
+                  final OutputStream currentOutput =
+                      output;
 
                   if (
-                      socket == null ||
-                      !socket.isConnected() ||
-                      output == null
+                      currentSocket == null ||
+                      !currentSocket.isConnected() ||
+                      currentSocket.isClosed() ||
+                      currentOutput == null
                   ) {
 
                       call.reject(
@@ -469,52 +551,180 @@ jobs:
 
                   new Thread(() -> {
 
-                      try {
+                      synchronized (
+                          BluetoothPrinterPlugin.this
+                      ) {
 
-                          byte[] bytes =
-                              android.util.Base64.decode(
-                                  data,
-                                  android.util.Base64.DEFAULT
+                          try {
+
+                              byte[] bytes =
+                                  android.util.Base64.decode(
+                                      data,
+                                      android.util.Base64.DEFAULT
+                                  );
+
+                              if (
+                                  bytes == null ||
+                                  bytes.length == 0
+                              ) {
+
+                                  call.reject(
+                                      "Data cetak kosong."
+                                  );
+
+                                  return;
+                              }
+
+                              int offset = 0;
+
+                              /*
+                               * Kirim ESC/POS dalam potongan
+                               * kecil agar printer lebih stabil.
+                               */
+                              while (
+                                  offset < bytes.length
+                              ) {
+
+                                  int remaining =
+                                      bytes.length - offset;
+
+                                  int length =
+                                      Math.min(
+                                          WRITE_CHUNK_SIZE,
+                                          remaining
+                                      );
+
+                                  currentOutput.write(
+                                      bytes,
+                                      offset,
+                                      length
+                                  );
+
+                                  currentOutput.flush();
+
+                                  offset += length;
+
+                                  if (
+                                      offset < bytes.length
+                                  ) {
+
+                                      try {
+
+                                          Thread.sleep(
+                                              WRITE_DELAY_MS
+                                          );
+
+                                      } catch (
+                                          InterruptedException ignored
+                                      ) {
+
+                                          Thread.currentThread()
+                                              .interrupt();
+
+                                          break;
+                                      }
+                                  }
+                              }
+
+                              /*
+                               * Flush terakhir.
+                               */
+                              currentOutput.flush();
+
+                              /*
+                               * Beri waktu printer menerima
+                               * paket terakhir.
+                               */
+                              try {
+
+                                  Thread.sleep(300);
+
+                              } catch (
+                                  InterruptedException ignored
+                              ) {
+
+                                  Thread.currentThread()
+                                      .interrupt();
+                              }
+
+                              JSObject result =
+                                  new JSObject();
+
+                              result.put(
+                                  "success",
+                                  true
                               );
 
-                          output.write(bytes);
-                          output.flush();
+                              result.put(
+                                  "bytesSent",
+                                  bytes.length
+                              );
 
-                          JSObject result =
-                              new JSObject();
+                              call.resolve(result);
 
-                          result.put(
-                              "success",
-                              true
-                          );
+                          } catch (Exception e) {
 
-                          call.resolve(result);
-
-                      } catch (Exception e) {
-
-                          call.reject(
-                              "Gagal mencetak: " +
-                              e.getMessage(),
-                              e
-                          );
+                              call.reject(
+                                  "Gagal mencetak: " +
+                                  e.getMessage(),
+                                  e
+                              );
+                          }
                       }
 
                   }).start();
+              }
+
+
+              // ====================================================
+              // CLOSE CONNECTION
+              // ====================================================
+
+              private synchronized void closeConnection() {
+
+                  try {
+
+                      if (output != null) {
+                          output.flush();
+                      }
+
+                  } catch (Exception ignored) {}
+
+                  try {
+
+                      if (socket != null) {
+                          socket.close();
+                      }
+
+                  } catch (Exception ignored) {}
+
+                  output = null;
+                  socket = null;
+              }
+
+
+              // ====================================================
+              // CLEANUP
+              // ====================================================
+
+              @Override
+              protected void handleOnDestroy() {
+
+                  closeConnection();
+
+                  super.handleOnDestroy();
               }
           }
           EOF
 
 
       # ============================================================
-      # 10. BUAT DOWNLOAD FILE PLUGIN
+      # 7. DOWNLOAD FILE PLUGIN
       #
-      # Digunakan untuk menyimpan Excel langsung ke:
-      #
-      # Penyimpanan HP / Download
-      #
-      # bukan hanya membuka menu Share.
+      # Digunakan untuk:
+      # - Export Excel
+      # - Simpan file langsung ke folder Download
       # ============================================================
-
       - name: Buat DownloadFilePlugin
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/DownloadFilePlugin.java <<'EOF'
@@ -537,17 +747,26 @@ jobs:
           import java.io.FileOutputStream;
           import java.io.OutputStream;
 
-          @CapacitorPlugin(name = "DownloadFile")
-          public class DownloadFilePlugin extends Plugin {
+          @CapacitorPlugin(
+              name = "DownloadFile"
+          )
+          public class DownloadFilePlugin
+              extends Plugin {
 
               @PluginMethod
-              public void save(PluginCall call) {
+              public void save(
+                  PluginCall call
+              ) {
 
                   String fileName =
-                      call.getString("fileName");
+                      call.getString(
+                          "fileName"
+                      );
 
                   String data =
-                      call.getString("data");
+                      call.getString(
+                          "data"
+                      );
 
                   String mimeType =
                       call.getString(
@@ -589,6 +808,12 @@ jobs:
 
                       Uri uri;
 
+                      /*
+                       * Android 10+
+                       *
+                       * File langsung disimpan ke:
+                       * Download
+                       */
                       if (
                           Build.VERSION.SDK_INT >=
                           Build.VERSION_CODES.Q
@@ -628,7 +853,7 @@ jobs:
                           if (uri == null) {
 
                               call.reject(
-                                  "Gagal membuat file."
+                                  "Gagal membuat file Download."
                               );
 
                               return;
@@ -638,7 +863,9 @@ jobs:
                               OutputStream out =
                                   getContext()
                                       .getContentResolver()
-                                      .openOutputStream(uri)
+                                      .openOutputStream(
+                                          uri
+                                      )
                           ) {
 
                               if (out == null) {
@@ -671,6 +898,9 @@ jobs:
 
                       } else {
 
+                          /*
+                           * Android versi lama.
+                           */
                           File directory =
                               Environment
                                   .getExternalStoragePublicDirectory(
@@ -690,7 +920,9 @@ jobs:
 
                           try (
                               FileOutputStream out =
-                                  new FileOutputStream(file)
+                                  new FileOutputStream(
+                                      file
+                                  )
                           ) {
 
                               out.write(bytes);
@@ -698,11 +930,18 @@ jobs:
                           }
 
                           uri =
-                              Uri.fromFile(file);
+                              Uri.fromFile(
+                                  file
+                              );
                       }
 
                       JSObject result =
                           new JSObject();
+
+                      result.put(
+                          "success",
+                          true
+                      );
 
                       result.put(
                           "fileName",
@@ -735,9 +974,12 @@ jobs:
 
 
       # ============================================================
-      # 11. BUAT MAIN ACTIVITY
+      # 8. MAIN ACTIVITY
+      #
+      # Mendaftarkan:
+      # - BluetoothPrinterPlugin
+      # - DownloadFilePlugin
       # ============================================================
-
       - name: Buat MainActivity
         run: |
           cat > android/app/src/main/java/com/baksomaster/pos/MainActivity.java <<'EOF'
@@ -747,7 +989,8 @@ jobs:
 
           import com.getcapacitor.BridgeActivity;
 
-          public class MainActivity extends BridgeActivity {
+          public class MainActivity
+              extends BridgeActivity {
 
               @Override
               public void onCreate(
@@ -771,9 +1014,8 @@ jobs:
 
 
       # ============================================================
-      # 12. TAMBAHKAN PERMISSION BLUETOOTH
+      # 9. PERMISSION BLUETOOTH
       # ============================================================
-
       - name: Tambahkan permission Bluetooth
         run: |
           python3 - <<'PY'
@@ -792,31 +1034,184 @@ jobs:
               <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
           """
 
-          if "android.permission.BLUETOOTH_CONNECT" not in text:
+          if (
+              "android.permission.BLUETOOTH_CONNECT"
+              not in text
+          ):
 
               text = text.replace(
                   "<application",
-                  permissions + "\n    <application",
+                  permissions +
+                  "\n    <application",
                   1
               )
 
-              manifest.write_text(text)
-
+              manifest.write_text(
+                  text
+              )
           PY
 
-
       # ============================================================
-      # 13. SINKRONISASI CAPACITOR
+      # 10. SIAPKAN ICON BAKSO MASTER
+      #
+      # Sumber logo:
+      # icon.png
+      #
+      # Background:
+      # HITAM
       # ============================================================
+      - name: Siapkan icon Bakso Master
+        run: |
+          echo "Memeriksa file icon.png..."
 
+          if [ ! -f "icon.png" ]; then
+            echo "ERROR: icon.png tidak ditemukan di root repository."
+            echo "Isi root repository:"
+            ls -la
+            exit 1
+          fi
+
+          echo "icon.png ditemukan."
+
+          echo "Install Pillow..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install Pillow
+
+          echo "Membuat icon Android..."
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          source = Path("icon.png")
+
+          if not source.exists():
+              raise SystemExit(
+                  "ERROR: file icon.png tidak ditemukan."
+              )
+
+          # Buka logo asli
+          img = Image.open(source).convert("RGBA")
+
+          print(
+              f"Ukuran logo asli: {img.width}x{img.height}"
+          )
+
+          # Buat kanvas persegi
+          size = max(
+              img.width,
+              img.height
+          )
+
+          # Background HITAM
+          canvas = Image.new(
+              "RGBA",
+              (size, size),
+              (0, 0, 0, 255)
+          )
+
+          # Posisi logo di tengah
+          x = (size - img.width) // 2
+          y = (size - img.height) // 2
+
+          canvas.alpha_composite(
+              img,
+              (x, y)
+          )
+
+          # Folder resource Android
+          base = Path(
+              "android/app/src/main/res"
+          )
+
+          # Ukuran icon Android
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192
+          }
+
+          for folder, px in sizes.items():
+
+              directory = base / folder
+
+              directory.mkdir(
+                  parents=True,
+                  exist_ok=True
+              )
+
+              resized = canvas.resize(
+                  (px, px),
+                  Image.Resampling.LANCZOS
+              )
+
+              resized.save(
+                  directory / "ic_launcher.png",
+                  "PNG"
+              )
+
+              resized.save(
+                  directory / "ic_launcher_round.png",
+                  "PNG"
+              )
+
+              print(
+                  f"Berhasil membuat {folder}: {px}x{px}"
+              )
+
+          # Hapus adaptive icon bawaan Capacitor/Android
+          adaptive_dirs = [
+              base / "mipmap-anydpi-v26",
+              base / "mipmap-anydpi"
+          ]
+
+          for directory in adaptive_dirs:
+
+              if directory.exists():
+
+                  for filename in [
+                      "ic_launcher.xml",
+                      "ic_launcher_round.xml"
+                  ]:
+
+                      target = directory / filename
+
+                      if target.exists():
+                          target.unlink()
+
+          print(
+              "========================================"
+          )
+
+          print(
+              "ICON BAKSO MASTER BERHASIL DIBUAT"
+          )
+
+          print(
+              "Background: HITAM"
+          )
+
+          print(
+              "Logo: icon.png asli"
+          )
+
+          print(
+              "========================================"
+          )
+          PY
+      # ============================================================
+      # 11. SINKRONISASI CAPACITOR
+      # ============================================================
       - name: Sinkronisasi Capacitor
-        run: npx cap sync android
+        run: |
+          npx cap sync android
 
 
       # ============================================================
-      # 14. SIAPKAN JAVA 21
+      # 12. JAVA 21
       # ============================================================
-
       - name: Siapkan Java
         uses: actions/setup-java@v4
         with:
@@ -825,18 +1220,18 @@ jobs:
 
 
       # ============================================================
-      # 15. BUILD APK
+      # 13. BUILD APK
       # ============================================================
-
       - name: Build APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
 
       # ============================================================
-      # 16. SIMPAN APK SEBAGAI ARTIFACT
+      # 14. UPLOAD APK
       # ============================================================
-
       - name: Simpan APK
         uses: actions/upload-artifact@v4
         with:
