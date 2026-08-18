@@ -1051,11 +1051,34 @@ jobs:
               )
           PY
 
-
       # ============================================================
       # 10. SIAPKAN ICON BAKSO MASTER
+      #
+      # Sumber logo:
+      # icon.png
+      #
+      # Background:
+      # HITAM
+      # ============================================================
       - name: Siapkan icon Bakso Master
         run: |
+          echo "Memeriksa file icon.png..."
+
+          if [ ! -f "icon.png" ]; then
+            echo "ERROR: icon.png tidak ditemukan di root repository."
+            echo "Isi root repository:"
+            ls -la
+            exit 1
+          fi
+
+          echo "icon.png ditemukan."
+
+          echo "Install Pillow..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install Pillow
+
+          echo "Membuat icon Android..."
+
           python3 - <<'PY'
           from pathlib import Path
           from PIL import Image
@@ -1064,24 +1087,44 @@ jobs:
 
           if not source.exists():
               raise SystemExit(
-                  "ERROR: file icon.png tidak ditemukan di root repository."
+                  "ERROR: file icon.png tidak ditemukan."
               )
 
+          # Buka logo asli
           img = Image.open(source).convert("RGBA")
 
-          size = max(img.width, img.height)
+          print(
+              f"Ukuran logo asli: {img.width}x{img.height}"
+          )
 
+          # Buat kanvas persegi
+          size = max(
+              img.width,
+              img.height
+          )
+
+          # Background HITAM
           canvas = Image.new(
               "RGBA",
               (size, size),
               (0, 0, 0, 255)
           )
 
+          # Posisi logo di tengah
           x = (size - img.width) // 2
           y = (size - img.height) // 2
 
-          canvas.alpha_composite(img, (x, y))
+          canvas.alpha_composite(
+              img,
+              (x, y)
+          )
 
+          # Folder resource Android
+          base = Path(
+              "android/app/src/main/res"
+          )
+
+          # Ukuran icon Android
           sizes = {
               "mipmap-mdpi": 48,
               "mipmap-hdpi": 72,
@@ -1089,8 +1132,6 @@ jobs:
               "mipmap-xxhdpi": 144,
               "mipmap-xxxhdpi": 192
           }
-
-          base = Path("android/app/src/main/res")
 
           for folder, px in sizes.items():
 
@@ -1116,6 +1157,11 @@ jobs:
                   "PNG"
               )
 
+              print(
+                  f"Berhasil membuat {folder}: {px}x{px}"
+              )
+
+          # Hapus adaptive icon bawaan Capacitor/Android
           adaptive_dirs = [
               base / "mipmap-anydpi-v26",
               base / "mipmap-anydpi"
@@ -1136,7 +1182,23 @@ jobs:
                           target.unlink()
 
           print(
-              "Icon Bakso Master dengan background HITAM berhasil dibuat."
+              "========================================"
+          )
+
+          print(
+              "ICON BAKSO MASTER BERHASIL DIBUAT"
+          )
+
+          print(
+              "Background: HITAM"
+          )
+
+          print(
+              "Logo: icon.png asli"
+          )
+
+          print(
+              "========================================"
           )
           PY
 
